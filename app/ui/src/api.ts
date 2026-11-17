@@ -11,7 +11,13 @@ export interface ImportFields {
   expected_speakers?: number | null;
   language?: string | null;
   note?: string | null;
+  /** The Advanced panel: 'light-1' or 'heavy-1'; empty picks by language. */
+  pack?: string | null;
+  /** One microphone per person: transcribe each track, or each channel, as one known speaker. */
+  tracks?: TrackMode;
 }
+
+export type TrackMode = 'mixed' | 'tracks' | 'channels';
 
 export interface MediaFile extends ImportFields {
   id: string;
@@ -21,6 +27,8 @@ export interface MediaFile extends ImportFields {
   bytes: number;
   duration: number;
   has_video: boolean;
+  audio_tracks?: number;
+  channels?: number;
   imported: string;
   status: MediaStatus;
   error?: string | null;
@@ -51,11 +59,36 @@ export interface Turn {
   words: Word[];
 }
 
+export type Role = 'interviewer' | 'moderator' | 'participant' | 'other';
+
 export interface Speaker {
   id: string;
   label: string;
   name?: string | null;
-  role: string;
+  role: Role;
+  attributes?: Record<string, string>;
+}
+
+export interface SpeakerStats {
+  id: string;
+  turns: number;
+  words: number;
+  seconds: number;
+}
+
+export type SpeakerOp =
+  | { op: 'split'; turn: number; word: number }
+  | { op: 'reassign'; turn: number; from?: number | null; to?: number | null; speaker: string }
+  | { op: 'join_previous'; turn: number }
+  | { op: 'merge'; from: string; into: string }
+  | { op: 'add' }
+  | { op: 'remove'; id: string };
+
+export interface SpeakerEdit {
+  speakers: Speaker[];
+  turns: Turn[];
+  turn: number | null;
+  changed: boolean;
 }
 
 export type ReviewStatus = 'not_started' | 'first_pass' | 'checked' | 'de_identified' | 'final';
@@ -124,12 +157,22 @@ export interface InstallEvent {
   error: string | null;
 }
 
+export interface PackStatus {
+  id: string;
+  name: string;
+  installed: boolean;
+  message: string;
+  download_mb: number;
+  program?: string | null;
+}
+
 export interface ModelStatus {
   installed: boolean;
   message: string;
   dir: string;
   pack: string;
   download_mb: number;
+  heavy: PackStatus;
 }
 
 export interface Settings {
@@ -137,6 +180,7 @@ export interface Settings {
   model_dir?: string | null;
   ffmpeg?: string | null;
   threads?: number | null;
+  whisper?: string | null;
 }
 
 export type Timestamps = { mode: 'per_turn' } | { mode: 'every'; seconds: number } | { mode: 'none' };
@@ -159,8 +203,11 @@ export const api = {
   transcript: (id: string) => invoke<Transcript | null>('transcript', { id }),
   exportFile: (id: string, path: string, options: ExportOptions) => invoke<void>('export', { id, path, options }),
   modelsStatus: () => invoke<ModelStatus>('models_status'),
-  modelsInstall: () => invoke<void>('models_install'),
-  modelsImportZip: (path: string) => invoke<ModelStatus>('models_import_zip', { path }),
+  modelsInstall: (pack?: string) => invoke<void>('models_install', { pack: pack ?? null }),
+  modelsImportZip: (path: string, pack?: string) => invoke<ModelStatus>('models_import_zip', { path, pack: pack ?? null }),
+  speakersEdit: (op: SpeakerOp, speakers: Speaker[], turns: Turn[]) => invoke<SpeakerEdit>('speakers_edit', { op, speakers, turns }),
+  speakersStats: (speakers: Speaker[], turns: Turn[]) => invoke<SpeakerStats[]>('speakers_stats', { speakers, turns }),
+  findSpeakersAgain: (id: string, turns: Turn[], expected: number | null) => invoke<SpeakerEdit>('speakers_find_again', { id, turns, expected }),
   editorInfo: (id: string) => invoke<EditorInfo>('editor_info', { id }),
   peaks: (id: string) => invoke<number[]>('peaks', { id }),
   retimeTurn: (turn: Turn, text: string, lo: number, hi: number) => invoke<Turn>('retime_turn', { turn, text, lo, hi }),

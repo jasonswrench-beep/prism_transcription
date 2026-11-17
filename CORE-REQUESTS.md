@@ -43,6 +43,12 @@ would look in both during a changeover.
 (`crates/speech/src/models.rs`, and `docs/MODELS.md` for the record). The core would own one manifest format so
 Transcribe, Author, Recorder, Studio and Scroll check models the same way.
 
+**Phase 3: the second plugin is built.** `crates/speech/src/whisper.rs` runs whisper.cpp's `whisper-cli.exe` (v1.9.5,
+the same commit as Author's) as a separate program for the recognize job only, reading its `-ojf` JSON. One addition to
+the contract came with it: `SpeechRecognizer::recognize_many`, several stretches in one call (the default calls
+`recognize` for each), so an engine that is a separate program loads its model once per batch rather than once per
+stretch (1.6 GB for Whisper large-v3-turbo). Author's captions could use the same plugin unchanged.
+
 **What Transcribe will do until the core has it.** Keep C5 as `crates/speech` in this repository with no
 Transcribe-specific types in it, and move it when the core opens the C5 round.
 

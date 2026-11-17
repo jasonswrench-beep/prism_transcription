@@ -15,7 +15,17 @@ export type Action =
   | 'snapshot'
   | 'next_turn'
   | 'previous_turn'
-  | 'play_turn';
+  | 'play_turn'
+  | 'speakers'
+  | SpeakerAction;
+
+/** Give the turn (or the selected words) to speaker n, for the first nine speakers (T3). */
+export type SpeakerAction = 'speaker_1' | 'speaker_2' | 'speaker_3' | 'speaker_4' | 'speaker_5' | 'speaker_6' | 'speaker_7' | 'speaker_8' | 'speaker_9';
+
+export function speakerSlot(a: Action): number | null {
+  const m = /^speaker_([1-9])$/.exec(a);
+  return m ? Number(m[1]) : null;
+}
 
 export const ACTION_LABELS: Record<Action, string> = {
   play_pause: 'Play or pause',
@@ -31,6 +41,16 @@ export const ACTION_LABELS: Record<Action, string> = {
   next_turn: 'Next turn',
   previous_turn: 'Previous turn',
   play_turn: 'Play this turn from its start',
+  speakers: 'Speakers panel',
+  speaker_1: 'Give to speaker 1',
+  speaker_2: 'Give to speaker 2',
+  speaker_3: 'Give to speaker 3',
+  speaker_4: 'Give to speaker 4',
+  speaker_5: 'Give to speaker 5',
+  speaker_6: 'Give to speaker 6',
+  speaker_7: 'Give to speaker 7',
+  speaker_8: 'Give to speaker 8',
+  speaker_9: 'Give to speaker 9',
 };
 
 export interface KeyLike {

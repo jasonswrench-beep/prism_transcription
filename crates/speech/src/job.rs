@@ -20,13 +20,20 @@ pub struct JobOptions {
     pub chunk_seconds: f64,
     /// A wordless stretch of at least this many seconds inside a chunk is recognized again (phase 0, problem 1).
     pub regap_seconds: f64,
-    /// Label speakers at all (false for a file with one known speaker).
+    /// Label speakers at all (false for a file with one known speaker, or one track of a multi-track file).
     pub label_speakers: bool,
+    /// Chunks given to the recognizer in one call: 1 for engines inside this program, more for one that runs as a
+    /// separate program and loads its model on every call (whisper.cpp). Batches of more than one skip the
+    /// wordless-stretch check, which is for Parakeet.
+    pub batch: usize,
+    /// Drop every word that does not touch detected speech (within 0.3 s): the guard against Whisper writing text
+    /// over silence.
+    pub drop_outside_speech: bool,
 }
 
 impl Default for JobOptions {
     fn default() -> Self {
-        Self { language: None, expected_speakers: None, chunk_seconds: 30.0, regap_seconds: 1.5, label_speakers: true }
+        Self { language: None, expected_speakers: None, chunk_seconds: 30.0, regap_seconds: 1.5, label_speakers: true, batch: 1, drop_outside_speech: false }
     }
 }
 
@@ -100,16 +107,32 @@ pub fn run(
     };
     let resumed = cp.words.iter().filter(|w| w.is_some()).count();
     let total = cp.chunks.len();
-    for i in 0..total {
+    let batch = opts.batch.max(1);
+    let mut i = 0;
+    while i < total {
         if cp.words[i].is_some() {
+            i += 1;
             continue;
         }
         let done = cp.words.iter().filter(|w| w.is_some()).count();
         if !progress(Progress::Recognize { done, total, seconds: cp.chunks[i].start }) {
             return Err(SpeechError::Cancelled);
         }
-        let w = pipeline::recognize_chunk(asr, samples, cp.chunks[i], opts.language.as_deref(), opts.regap_seconds)?;
-        cp.words[i] = Some(w);
+        if batch == 1 {
+            let w = pipeline::recognize_chunk(asr, samples, cp.chunks[i], opts.language.as_deref(), opts.regap_seconds)?;
+            cp.words[i] = Some(w);
+            i += 1;
+        } else {
+            let todo: Vec<usize> = (i..total).filter(|k| cp.words[*k].is_none()).take(batch).collect();
+            let sr = SAMPLE_RATE as f64;
+            let slice = |c: Chunk| &samples[((c.start * sr) as usize).min(samples.len())..((c.end * sr) as usize).min(samples.len())];
+            let pieces: Vec<(&[f32], f64)> = todo.iter().map(|k| (slice(cp.chunks[*k]), cp.chunks[*k].start)).collect();
+            let got = asr.recognize_many(&pieces, opts.language.as_deref())?;
+            for (k, w) in todo.iter().zip(got) {
+                cp.words[*k] = Some(w);
+            }
+            i = todo.last().map(|k| k + 1).unwrap_or(total);
+        }
         cp.save(checkpoint)?;
     }
     if !progress(Progress::Recognize { done: total, total, seconds: duration }) {
@@ -130,11 +153,36 @@ pub fn run(
     };
     let mut words: Vec<Word> = cp.words.iter().flatten().flatten().cloned().collect();
     words.sort_by(|a, b| a.start.total_cmp(&b.start));
+    if opts.drop_outside_speech {
+        words.retain(|w| cp.speech.iter().any(|s| w.end >= s.start - 0.3 && w.start <= s.end + 0.3));
+    }
     let labels = if speaker_spans.is_empty() { vec![0; words.len()] } else { pipeline::speakers_for_words(&words, &speaker_spans) };
     let turns = pipeline::turns(words, &labels);
     let _ = std::fs::remove_file(checkpoint);
     progress(Progress::Finished);
     Ok(JobOutput { speech: cp.speech, speaker_spans, turns, resumed_chunks: resumed })
+}
+
+/// For a recording whose speakers are already known (one track): labels nothing.
+pub struct NoSpeakers;
+
+impl SpeakerLabeler for NoSpeakers {
+    fn label(&self, _: &[f32], _: Option<u32>) -> Result<Vec<SpeakerSpan>> {
+        Ok(Vec::new())
+    }
+}
+
+/// A voice detector that keeps only the 20 ms frames of `mask` (one microphone's own speaker, from
+/// [`pipeline::dominance_masks`]), so a voice heard through another person's microphone is not recognized twice.
+pub struct MaskedVad<'a> {
+    pub inner: &'a dyn VoiceDetector,
+    pub mask: Vec<bool>,
+}
+
+impl VoiceDetector for MaskedVad<'_> {
+    fn detect(&self, samples: &[f32]) -> Result<Vec<SpeechSpan>> {
+        Ok(pipeline::mask_spans(&self.inner.detect(samples)?, &self.mask, 0.25))
+    }
 }
 
 #[cfg(test)]
@@ -212,5 +260,46 @@ mod tests {
         let _ = run(&samples, &BlockVad, &asr, &TwoHalves, &opts, &cp, "a", &mut |p| !matches!(p, Progress::Recognize { done: 1, .. }));
         let out = run(&samples, &BlockVad, &asr, &TwoHalves, &opts, &cp, "b", &mut |_| true).unwrap();
         assert_eq!(out.resumed_chunks, 0);
+    }
+
+    /// Counts calls of the batch method; words land in silence too, to be dropped.
+    struct BatchAsr<'a>(&'a Cell<usize>);
+    impl SpeechRecognizer for BatchAsr<'_> {
+        fn recognize(&self, _: &[f32], _: f64, _: Option<&str>) -> Result<Vec<Word>> {
+            unreachable!("a batching engine is only called through recognize_many")
+        }
+        fn recognize_many(&self, pieces: &[(&[f32], f64)], _: Option<&str>) -> Result<Vec<Vec<Word>>> {
+            self.0.set(self.0.get() + 1);
+            Ok(pieces.iter().map(|(_, o)| vec![Word { text: "said".into(), start: o + 0.3, end: o + 0.6, confidence: 1.0 }, Word { text: "ghost".into(), start: 500.0, end: 501.0, confidence: 1.0 }]).collect())
+        }
+        fn languages(&self) -> &[&'static str] {
+            &["en"]
+        }
+    }
+
+    #[test]
+    fn batches_load_the_model_once_per_batch_and_silence_is_dropped() {
+        let d = tempfile::tempdir().unwrap();
+        let cp = d.path().join("job.json");
+        let samples = vec![0.1f32; 16_000 * 40];
+        let opts = JobOptions { chunk_seconds: 5.0, batch: 4, drop_outside_speech: true, label_speakers: false, ..Default::default() };
+        let calls = Cell::new(0);
+        let out = run(&samples, &BlockVad, &BatchAsr(&calls), &NoSpeakers, &opts, &cp, "k", &mut |_| true).unwrap();
+        let chunks = out.speech.len().div_ceil(5);
+        assert_eq!(calls.get(), chunks.div_ceil(4), "{chunks} chunks in batches of 4");
+        let words: Vec<&Word> = out.turns.iter().flat_map(|t| &t.words).collect();
+        assert!(words.iter().all(|w| w.text == "said"), "the word written over silence was dropped");
+        assert_eq!(words.len(), chunks);
+    }
+
+    #[test]
+    fn a_masked_detector_keeps_only_its_frames() {
+        let samples = vec![0.1f32; 16_000 * 3];
+        let mut mask = vec![false; 150];
+        mask[50..100].iter_mut().for_each(|m| *m = true); // the second second
+        let v = MaskedVad { inner: &BlockVad, mask };
+        let spans = v.detect(&samples).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert!((spans[0].start - 1.1).abs() < 1e-9 && (spans[0].end - 1.9).abs() < 1e-9, "{spans:?}");
     }
 }

@@ -4,13 +4,14 @@
 // it, before saving, and before anything that changes the transcript as a whole.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
-import { api, type EditorInfo, type MediaFile, type ReviewStatus, type Transcript, type Turn } from '../api';
+import { api, type EditorInfo, type MediaFile, type ReviewStatus, type Speaker, type SpeakerOp, type SpeakerStats, type Transcript, type Turn } from '../api';
 import { hms, LOW_CONFIDENCE } from '../format';
 import { History } from './history';
-import { actionFor, showKey, type Action } from './keys';
+import { actionFor, showKey, speakerSlot, type Action } from './keys';
 import { MediaPane, type PlayerState } from './MediaPane';
 import { fillNotation, findIn, locate, timeline, turnText, wordAt, wordOffsets, type FindOptions } from './words';
 import { FindBar, HotkeysDialog, NotationMenu, SnapshotsDialog } from './dialogs';
+import { speakerName, SpeakersDialog } from './speakers';
 
 const REVIEW_WORDS: Record<ReviewStatus, string> = {
   not_started: 'Not started',
@@ -60,6 +61,39 @@ function caretOffset(el: HTMLElement): number | null {
   return r.toString().length;
 }
 
+/** The selection inside `el` as text offsets, or null when it is collapsed or elsewhere. */
+function selectionOffsets(el: HTMLElement): [number, number] | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!el.contains(range.startContainer) || !el.contains(range.endContainer)) return null;
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  r.setEnd(range.startContainer, range.startOffset);
+  const a = r.toString().length;
+  return [a, a + range.toString().length];
+}
+
+/** Put the cursor at a text offset in `el`. */
+function placeCaret(el: HTMLElement, offset: number) {
+  el.focus();
+  const r = rangeIn(el, offset, offset);
+  if (!r) return;
+  const sel = window.getSelection()!;
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
+/** Every speaker a list of turns refers to, keeping `speakers` and adding any missing one (a snapshot from before a
+ * merge refers to the speaker merged away). */
+function speakersFor(turns: Turn[], speakers: Speaker[]): Speaker[] {
+  const out = speakers.slice();
+  for (const t of turns) {
+    if (!out.some((s) => s.id === t.speaker)) out.push({ id: t.speaker, label: `Speaker ${t.speaker.replace(/^S/, '')}`, role: 'other', attributes: {} });
+  }
+  return out;
+}
+
 // ---- One turn ---------------------------------------------------------------------------------------------
 
 const TurnRow = memo(function TurnRow(props: {
@@ -67,6 +101,7 @@ const TurnRow = memo(function TurnRow(props: {
   index: number;
   name: string;
   colour: number;
+  speakers: Speaker[];
   checked: boolean;
   clean: boolean[] | null;
   register: (i: number, el: HTMLDivElement | null) => void;
@@ -74,6 +109,9 @@ const TurnRow = memo(function TurnRow(props: {
   onFocus: (i: number) => void;
   onBlur: (i: number) => void;
   onWordClick: (i: number, e: React.MouseEvent<HTMLDivElement>) => void;
+  onSpeaker: (i: number, id: string) => void;
+  onSplit: (i: number) => void;
+  onJoin: (i: number) => void;
 }) {
   const { turn, index } = props;
   const text = props.clean ? turn.words.filter((_, i) => props.clean![i]).map((w) => w.text).join(' ') : turnText(turn);
@@ -85,9 +123,23 @@ const TurnRow = memo(function TurnRow(props: {
   }, [text]);
   return (
     <div className={`turn speaker-${props.colour}${props.checked ? ' checked' : ''}`} role="group" aria-label={`${props.name}, ${hms(turn.start)}`}>
-      <div className="turn-head" aria-hidden="true">
-        <span className="who">{props.name}</span>
-        <span className="time">{hms(turn.start)}</span>
+      <div className="turn-head">
+        <select
+          className="who"
+          value={turn.speaker}
+          aria-label={`Speaker of the turn at ${hms(turn.start)}`}
+          onChange={(e) => props.onSpeaker(index, e.target.value)}
+        >
+          {props.speakers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {speakerName(s)}
+            </option>
+          ))}
+          <option value="">New speaker…</option>
+        </select>
+        <span className="time" aria-hidden="true">
+          {hms(turn.start)}
+        </span>
       </div>
       <div
         ref={(el) => {
@@ -109,7 +161,15 @@ const TurnRow = memo(function TurnRow(props: {
         onBlur={() => props.onBlur(index)}
         onClick={(e) => props.onWordClick(index, e)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') e.preventDefault(); // one paragraph per turn; splitting turns comes with speakers (phase 3)
+          if (props.clean) return;
+          if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // One paragraph per turn: Enter splits the turn at the cursor (T3).
+            e.preventDefault();
+            props.onSplit(index);
+          } else if (e.key === 'Backspace' && index > 0 && caretOffset(e.currentTarget) === 0 && window.getSelection()?.isCollapsed) {
+            e.preventDefault();
+            props.onJoin(index);
+          }
         }}
       />
     </div>
@@ -122,8 +182,12 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
   const [info, setInfo] = useState<EditorInfo | null>(null);
   const [peaks, setPeaks] = useState<number[] | null>(null);
   const [meta, setMeta] = useState<Transcript>(props.transcript);
-  const history = useRef(new History<Turn[]>(props.transcript.turns));
+  // Undo covers the words and the speakers together: a merge or a rename is undone like a typing change.
+  const history = useRef(new History<{ turns: Turn[]; speakers: Speaker[] }>({ turns: props.transcript.turns, speakers: props.transcript.speakers }));
   const [turns, setTurnsState] = useState<Turn[]>(props.transcript.turns);
+  const [speakers, setSpeakersState] = useState<Speaker[]>(props.transcript.speakers);
+  const [speakersOpen, setSpeakersOpen] = useState(false);
+  const [stats, setStats] = useState<SpeakerStats[]>([]);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [player, setPlayer] = useState<PlayerState>({ time: 0, playing: false, rate: 1, boost: 1 });
@@ -143,13 +207,15 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
   const savedRange = useRef<{ turn: number; start: number; end: number } | null>(null);
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
+  const speakersRef = useRef(speakers);
+  speakersRef.current = speakers;
   const metaRef = useRef(meta);
   metaRef.current = meta;
   const audio = useRef<{ ctx: AudioContext; gain: GainNode } | null>(null);
   const lastPause = useRef<number | null>(null);
 
-  const speakerNumber = useCallback((id: string) => meta.speakers.findIndex((s) => s.id === id) + 1 || 1, [meta.speakers]);
-  const names = useMemo(() => new Map(meta.speakers.map((s) => [s.id, s.name?.trim() || s.label])), [meta.speakers]);
+  const speakerNumber = useCallback((id: string) => speakers.findIndex((s) => s.id === id) + 1 || 1, [speakers]);
+  const names = useMemo(() => new Map(speakers.map((s) => [s.id, speakerName(s)])), [speakers]);
   const tl = useMemo(() => timeline(turns), [turns]);
   const keyLabel = useCallback((a: string) => (hotkeys[a] ? showKey(hotkeys[a]) : ''), [hotkeys]);
 
@@ -162,11 +228,15 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.file.id]);
 
-  const setTurns = useCallback((next: Turn[], record = true) => {
-    if (record) history.current.push(next);
-    setTurnsState(next);
+  const setDoc = useCallback((nextTurns: Turn[], nextSpeakers: Speaker[], record = true) => {
+    if (record) history.current.push({ turns: nextTurns, speakers: nextSpeakers });
+    turnsRef.current = nextTurns;
+    speakersRef.current = nextSpeakers;
+    setTurnsState(nextTurns);
+    setSpeakersState(nextSpeakers);
     setDirty(true);
   }, []);
+  const setTurns = useCallback((next: Turn[], record = true) => setDoc(next, speakersRef.current, record), [setDoc]);
 
   // ---- committing and saving ----
 
@@ -196,7 +266,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
   const save = useCallback(async (quiet = false) => {
     const t = await commitAll();
     try {
-      await api.saveTranscript({ ...metaRef.current, turns: t });
+      await api.saveTranscript({ ...metaRef.current, speakers: speakersRef.current, turns: t });
       setDirty(false);
       setSavedAt(new Date());
       props.onSaved();
@@ -373,7 +443,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
       const r = await api.replaceInProject(findState.query, replace, findState.options);
       const fresh = await api.transcript(props.file.id);
       if (fresh) {
-        setTurns(fresh.turns);
+        setDoc(fresh.turns, fresh.speakers);
         setDirty(false);
       }
       const n = r.reduce((s, [, c]) => s + c, 0);
@@ -479,9 +549,101 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
     el.scrollIntoView({ block: 'nearest' });
   };
 
+  // ---- speakers (T3) ----
+
+  /** Put the cursor in turn `turn` at `offset` once the new turns are drawn. */
+  const focusAfter = (turn: number | null, offset = 0) => {
+    if (turn === null) return;
+    requestAnimationFrame(() => {
+      const el = els.current[turn];
+      if (el) {
+        placeCaret(el, offset);
+        el.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  };
+
+  /** Run speaker operations one after another on the committed turns; one undo step for all of them. */
+  const speakerOps = async (ops: ((sp: Speaker[]) => SpeakerOp)[]) => {
+    let t = await commitAll();
+    let sp = speakersRef.current;
+    let last = { speakers: sp, turns: t, turn: null as number | null, changed: false };
+    for (const make of ops) {
+      const r = await api.speakersEdit(make(sp), sp, t);
+      sp = r.speakers;
+      t = r.turns;
+      last = { ...r, changed: last.changed || r.changed };
+    }
+    if (last.changed) {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      setDoc(t, sp);
+    }
+    return last;
+  };
+
+  /** Give turn `i`, or its words `range`, to speaker `id` ('' for a new speaker). */
+  const assign = async (i: number, id: string, range: [number, number] | null) => {
+    const ops: ((sp: Speaker[]) => SpeakerOp)[] = [];
+    if (!id) ops.push(() => ({ op: 'add' }));
+    ops.push((sp) => ({ op: 'reassign', turn: i, from: range?.[0] ?? null, to: range?.[1] ?? null, speaker: id || sp[sp.length - 1].id }));
+    const r = await speakerOps(ops);
+    focusAfter(r.turn);
+    return r;
+  };
+
+  const assignToSlot = async (n: number) => {
+    const sp = speakersRef.current[n - 1];
+    const i = active.current;
+    const count = speakersRef.current.length;
+    if (!sp) return props.onNotice(`There ${count === 1 ? 'is 1 speaker' : `are ${count} speakers`}; add one in the Speakers panel first.`);
+    const el = i !== null ? els.current[i] : null;
+    if (i === null || !el) return props.onNotice('Put the cursor in a turn first, then give it to a speaker.');
+    const sel = selectionOffsets(el);
+    const t = (await commitAll())[i];
+    if (!t) return;
+    let range: [number, number] | null = null;
+    if (sel) {
+      const off = wordOffsets(t.words);
+      const from = off.findIndex(([, b]) => b > sel[0]);
+      let to = off.length;
+      while (to > 0 && off[to - 1][0] >= sel[1]) to--;
+      if (from >= 0 && to > from) range = [from, to];
+    }
+    await assign(i, sp.id, range);
+    const n2 = range ? range[1] - range[0] : 0;
+    props.onNotice(range ? `${n2} word${n2 === 1 ? '' : 's'} given to ${speakerName(sp)}.` : `Turn given to ${speakerName(sp)}.`);
+  };
+
+  const splitAtCursor = async (i: number) => {
+    const el = els.current[i];
+    if (!el) return;
+    const off = caretOffset(el) ?? 0;
+    const t = (await commitAll())[i];
+    if (!t) return;
+    const at = wordOffsets(t.words).filter(([a]) => a < off).length;
+    const r = await speakerOps([() => ({ op: 'split', turn: i, word: at })]);
+    if (r.changed) focusAfter(i + 1, 0);
+    else props.onNotice('Put the cursor between two words to split the turn there.');
+  };
+
+  const joinWithPrevious = async (i: number) => {
+    const t = await commitAll();
+    const prevLen = t[i - 1] ? turnText(t[i - 1]).length : 0;
+    const r = await speakerOps([() => ({ op: 'join_previous', turn: i })]);
+    if (r.changed) focusAfter(i - 1, prevLen + 1);
+  };
+
   const run = (a: Action) => {
     const m = media();
+    const slot = speakerSlot(a);
+    if (slot !== null) {
+      assignToSlot(slot);
+      return;
+    }
     switch (a) {
+      case 'speakers':
+        setSpeakersOpen(true);
+        break;
       case 'play_pause':
         if (m && m.paused) play();
         else pause();
@@ -541,7 +703,8 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
         if (active.current !== null && pending.current.has(active.current)) return;
         e.preventDefault();
         const next = redo ? history.current.redo() : history.current.undo();
-        setTurns(next, false);
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        setDoc(next.turns, next.speakers, false);
         return;
       }
       if (ctrl && e.key.toLowerCase() === 's' && !e.shiftKey) {
@@ -558,9 +721,25 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [hotkeys, keysOpen, save, setTurns]);
+  }, [hotkeys, keysOpen, save, setDoc]);
 
   // ---- turn callbacks (stable, so unchanged turns are not re-rendered) ----
+
+  const opsRef = useRef({ assign, splitAtCursor, joinWithPrevious });
+  opsRef.current = { assign, splitAtCursor, joinWithPrevious };
+  const onSpeaker = useCallback((i: number, id: string) => {
+    opsRef.current.assign(i, id, null);
+  }, []);
+  const onSplit = useCallback((i: number) => {
+    opsRef.current.splitAtCursor(i);
+  }, []);
+  const onJoin = useCallback((i: number) => {
+    opsRef.current.joinWithPrevious(i);
+  }, []);
+
+  useEffect(() => {
+    if (speakersOpen) api.speakersStats(speakers, turns).then(setStats, () => setStats([]));
+  }, [speakersOpen, speakers, turns]);
 
   const register = useCallback((i: number, el: HTMLDivElement | null) => {
     els.current[i] = el;
@@ -632,6 +811,9 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
         <Button onPress={() => setFindOpen(true)} aria-label={`Find and replace (${keyLabel('find')})`}>
           Find
         </Button>
+        <Button onPress={() => setSpeakersOpen(true)} aria-label={`Speakers (${keyLabel('speakers')})`}>
+          Speakers
+        </Button>
         <Button onPress={() => setSnapOpen(true)}>Snapshots</Button>
         <Button onPress={() => setKeysOpen(true)}>Keys</Button>
         <span className="save-state" role="status">
@@ -655,7 +837,9 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
         <section className="turn-list" aria-label="Transcript, one turn per paragraph">
           <p className="hint">
             {checkedUntil !== null ? `Checked up to ${hms(checkedUntil)} (${checkedTurns} of ${turns.length} turns). ` : ''}
-            Click a word to play from it; Ctrl+click selects it. {cleanView ? 'The clean view hides fillers without deleting them; switch to Verbatim to edit.' : ''}
+            Click a word to play from it; Ctrl+click selects it. Enter splits a turn; {keyLabel('speaker_1')} to {keyLabel('speaker_9')} give it to a speaker.{' '}
+            {meta.provenance.pack === 'heavy-1' ? 'Word times come from Whisper and are approximate. ' : ''}
+            {cleanView ? 'The clean view hides fillers without deleting them; switch to Verbatim to edit.' : ''}
           </p>
           {turns.map((t, i) => (
             <TurnRow
@@ -664,6 +848,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
               index={i}
               name={names.get(t.speaker) ?? t.speaker}
               colour={((speakerNumber(t.speaker) - 1) % 8) + 1}
+              speakers={speakers}
               checked={checkedUntil !== null && t.end <= checkedUntil}
               clean={cleanView && masks ? masks[i] ?? null : null}
               register={register}
@@ -671,6 +856,9 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
               onFocus={onFocus}
               onBlur={onBlur}
               onWordClick={onWordClick}
+              onSpeaker={onSpeaker}
+              onSplit={onSplit}
+              onJoin={onJoin}
             />
           ))}
         </section>
@@ -718,9 +906,38 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
         }}
         onRestore={async (k) => {
           await commitAll();
-          setTurns(meta.snapshots[k].turns);
+          const snap = meta.snapshots[k].turns;
+          setDoc(snap, speakersFor(snap, speakersRef.current));
           setSnapOpen(false);
           props.onNotice(`Restored "${meta.snapshots[k].name}". Undo (Ctrl+Z) goes back to what you had.`);
+        }}
+      />
+      <SpeakersDialog
+        isOpen={speakersOpen}
+        speakers={speakers}
+        stats={stats}
+        canFindAgain={!props.file.tracks || props.file.tracks === 'mixed'}
+        expected={props.file.expected_speakers ?? null}
+        keyFor={(n) => keyLabel(`speaker_${n}`)}
+        onClose={() => setSpeakersOpen(false)}
+        onChange={(sp) => setDoc(turnsRef.current, speakersRef.current.map((x) => (x.id === sp.id ? sp : x)))}
+        onMerge={async (from, into) => {
+          const a = speakersRef.current.find((x) => x.id === from);
+          const b = speakersRef.current.find((x) => x.id === into);
+          const r = await speakerOps([() => ({ op: 'merge', from, into })]);
+          if (r.changed && a && b) props.onNotice(`${speakerName(a)} merged into ${speakerName(b)}. Undo (Ctrl+Z) separates them again.`);
+        }}
+        onAdd={() => speakerOps([() => ({ op: 'add' })]).then(() => {})}
+        onRemove={(id) => speakerOps([() => ({ op: 'remove', id })]).then(() => {})}
+        onFindAgain={async (expected) => {
+          const t = await commitAll();
+          try {
+            const r = await api.findSpeakersAgain(props.file.id, t, expected);
+            setDoc(r.turns, r.speakers);
+            props.onNotice(`Found ${r.speakers.length} speaker${r.speakers.length === 1 ? '' : 's'}. Undo (Ctrl+Z) brings back the speakers you had.`);
+          } catch (e) {
+            props.onNotice(`Could not find the speakers again: ${String(e)}`);
+          }
         }}
       />
       <HotkeysDialog

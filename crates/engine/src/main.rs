@@ -1,12 +1,14 @@
 //! prism-transcribe-cli: the app's work from the command line, for tests, batch scripts and machines without the
 //! window. Nothing here uses the network except `models install`, and that refuses when Offline is on.
 //!
-//!   prism-transcribe-cli models status|install|import-zip <zip>|export-zip <zip>   [--dir <model folder>]
+//!   prism-transcribe-cli models status|install|import-zip <zip>|export-zip <zip>   (light pack; add "heavy" after the
+//!                        command for the heavy pack: models install heavy)   [--dir <model folder>]
 //!   prism-transcribe-cli new <folder> <name>
 //!   prism-transcribe-cli import <project> <recording> [--label L] [--date D] [--speakers N] [--language xx] [--copy]
+//!                        [--pack light-1|heavy-1] [--tracks mixed|tracks|channels]
 //!   prism-transcribe-cli transcribe <project> <id>
 //!   prism-transcribe-cli export <project> <id> <out.docx|out.txt> [--timestamps turn|none|<seconds>] [--line-numbers] [--clean]
-//!   prism-transcribe-cli run <recording> --out <out.docx|out.txt> [--speakers N] [--project <folder>]
+//!   prism-transcribe-cli run <recording> --out <out.docx|out.txt> [--speakers N] [--project <folder>] and the import options
 
 use prism_transcribe_core::export::{ExportOptions, Timestamps};
 use prism_transcribe_core::project::{ImportFields, Project};
@@ -36,7 +38,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1).peekable();
     while let Some(x) = it.next() {
         if let Some(k) = x.strip_prefix("--") {
-            if matches!(k, "copy" | "line-numbers" | "clean") {
+            if matches!(k, "copy" | "line-numbers" | "clean" | "quick") {
                 a.flags.push(k.into());
             } else {
                 a.opts.insert(k.into(), it.next().unwrap_or_else(|| usage()));
@@ -67,6 +69,13 @@ fn fields(a: &Args) -> ImportFields {
         expected_speakers: a.opts.get("speakers").map(|s| s.parse().unwrap_or_else(|_| usage())),
         language: a.opts.get("language").cloned(),
         note: None,
+        pack: a.opts.get("pack").cloned(),
+        tracks: match a.opts.get("tracks").map(String::as_str) {
+            None | Some("mixed") => Default::default(),
+            Some("tracks") => prism_transcribe_core::project::TrackMode::Tracks,
+            Some("channels") => prism_transcribe_core::project::TrackMode::Channels,
+            Some(_) => usage(),
+        },
     }
 }
 
@@ -87,39 +96,58 @@ fn main() {
     }
     let model_dir = settings.model_dir();
     match a.pos.first().map(String::as_str) {
-        Some("models") => match a.pos.get(1).map(String::as_str) {
-            Some("status") => match models::verify(&models::LIGHT_PACK, &model_dir, a.flags.is_empty()) {
-                Ok(()) => println!("{} is installed in {}", models::LIGHT_PACK.name, model_dir.display()),
-                Err(e) => {
-                    println!("The light pack is not installed in {}: {e}", model_dir.display());
-                    std::process::exit(1)
-                }
-            },
-            Some("install") => {
-                let mut last = 0u64;
-                install::install_light_pack(&model_dir, settings.offline, &mut |p| {
-                    if p.pack_done - last > 20_000_000 || p.pack_done == p.pack_total {
-                        last = p.pack_done;
-                        eprint!("\r  {} MB of {} MB ({})            ", p.pack_done / 1_000_000, p.pack_total / 1_000_000, p.file);
+        Some("models") => {
+            // `models <command> [light|heavy]`; the light pack when none is named.
+            let pack = match a.pos.get(2).filter(|x| !x.contains('.')).map(String::as_str) {
+                None | Some("light") => &models::LIGHT_PACK,
+                Some("heavy") => &models::HEAVY_PACK,
+                Some(_) => usage(),
+            };
+            let arg = |i: usize| a.pos.get(if a.pos.get(2).is_some_and(|x| !x.contains('.')) { i + 1 } else { i }).unwrap_or_else(|| usage()).clone();
+            match a.pos.get(1).map(String::as_str) {
+                Some("status") => {
+                    let s = engine::pack_status(&settings, pack);
+                    let hashed = if a.flags.is_empty() { models::verify(pack, &model_dir, true).map_err(|e| e.to_string()) } else { Ok(()) };
+                    match (s.installed, hashed) {
+                        (true, Ok(())) => println!("{} is installed in {}{}", pack.name, model_dir.display(), s.program.map(|p| format!(" (program: {p})")).unwrap_or_default()),
+                        (_, Err(e)) => {
+                            println!("{} is not installed in {}: {e}", pack.name, model_dir.display());
+                            std::process::exit(1)
+                        }
+                        (false, _) => {
+                            println!("{} is not ready: {}", pack.name, s.message);
+                            std::process::exit(1)
+                        }
                     }
-                    true
-                })
-                .unwrap_or_else(|e| die(e));
-                eprintln!();
-                println!("Installed and checked: {}", model_dir.display());
+                }
+                Some("install") => {
+                    let (p, d) = install::downloads_for(pack.id).unwrap();
+                    let mut last = 0u64;
+                    install::install(p, d, &model_dir, settings.offline, &mut |p| {
+                        if p.pack_done - last > 20_000_000 || p.pack_done == p.pack_total {
+                            last = p.pack_done;
+                            eprint!("
+  {} MB of {} MB ({})            ", p.pack_done / 1_000_000, p.pack_total / 1_000_000, p.file);
+                        }
+                        true
+                    })
+                    .unwrap_or_else(|e| die(e));
+                    eprintln!();
+                    println!("Installed and checked: {}", model_dir.display());
+                }
+                Some("import-zip") => {
+                    let z = arg(2);
+                    install::import_zip(pack, z.as_ref(), &model_dir).unwrap_or_else(|e| die(e));
+                    println!("Imported and checked: {}", model_dir.display());
+                }
+                Some("export-zip") => {
+                    let z = arg(2);
+                    install::export_zip(pack, &model_dir, z.as_ref()).unwrap_or_else(|e| die(e));
+                    println!("Wrote {z}");
+                }
+                _ => usage(),
             }
-            Some("import-zip") => {
-                let z = a.pos.get(2).unwrap_or_else(|| usage());
-                install::import_zip(&models::LIGHT_PACK, z.as_ref(), &model_dir).unwrap_or_else(|e| die(e));
-                println!("Imported and checked: {}", model_dir.display());
-            }
-            Some("export-zip") => {
-                let z = a.pos.get(2).unwrap_or_else(|| usage());
-                install::export_zip(&models::LIGHT_PACK, &model_dir, z.as_ref()).unwrap_or_else(|e| die(e));
-                println!("Wrote {z}");
-            }
-            _ => usage(),
-        },
+        }
         Some("new") => {
             let (dir, name) = (a.pos.get(1).unwrap_or_else(|| usage()), a.pos.get(2).unwrap_or_else(|| usage()));
             Project::create(dir.as_ref(), name).unwrap_or_else(|e| die(e));

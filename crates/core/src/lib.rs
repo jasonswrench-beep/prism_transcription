@@ -5,5 +5,6 @@ pub mod edit;
 pub mod export;
 pub mod model;
 pub mod project;
+pub mod speakers;
 
 pub use model::SCHEMA_VERSION;

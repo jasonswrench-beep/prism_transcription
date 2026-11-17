@@ -36,6 +36,8 @@ pub enum MediaError {
     Decode(String),
     #[error("the job was cancelled")]
     Cancelled,
+    #[error("{0}, so it cannot be transcribed one microphone at a time")]
+    NotSplittable(String),
 }
 
 pub type Result<T> = std::result::Result<T, MediaError>;
@@ -265,6 +267,202 @@ pub fn to_16k_wav(input: &Path, output: &Path, ffmpeg: Option<&Path>, progress: 
     }
 }
 
+
+// ---------------------------------------------------------------------------------------------------------
+// One microphone per person (T1): a 16 kHz copy for each track, or for each channel
+// ---------------------------------------------------------------------------------------------------------
+
+/// How a recording holds one microphone per person.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Split {
+    /// Separate audio tracks (streams) in one file, as some recorders and video-call tools write them.
+    Tracks,
+    /// The channels of one track: a two-microphone recorder writing left and right, or a multichannel WAV.
+    Channels,
+}
+
+/// Write one 16 kHz mono WAV per track or per channel, to `output(k)` for k = 0, 1 ... Rust first, then FFmpeg.
+/// Returns the paths written; fewer than two parts is an error (there is nothing to split).
+pub fn split_16k(input: &Path, split: Split, output: &dyn Fn(usize) -> PathBuf, ffmpeg: Option<&Path>, progress: &mut dyn FnMut(f64) -> bool) -> Result<Vec<PathBuf>> {
+    let r = match split_rust(input, split, output, progress) {
+        Ok(p) => Ok(p),
+        Err(MediaError::Cancelled) => return Err(MediaError::Cancelled),
+        Err(MediaError::NotSplittable(m)) => return Err(MediaError::NotSplittable(m)),
+        Err(e) => match ffmpeg {
+            Some(f) => split_ffmpeg(f, input, split, output),
+            None => Err(MediaError::NeedsFfmpeg(e.to_string())),
+        },
+    }?;
+    if r.len() < 2 {
+        for p in &r {
+            let _ = std::fs::remove_file(p);
+        }
+        return Err(MediaError::NotSplittable(match split {
+            Split::Tracks => "this file has only one audio track".into(),
+            Split::Channels => "this file has only one channel".into(),
+        }));
+    }
+    Ok(r)
+}
+
+struct Part {
+    to16: Option<To16k>,
+    writer: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+}
+
+fn write_samples(writer: &mut hound::WavWriter<std::io::BufWriter<std::fs::File>>, s: &[f32]) -> Result<()> {
+    for &x in s {
+        writer.write_sample((x.clamp(-1.0, 1.0) * 32767.0).round() as i16).map_err(|e| MediaError::Io(std::io::Error::other(e)))?;
+    }
+    Ok(())
+}
+
+fn split_rust(input: &Path, split: Split, output: &dyn Fn(usize) -> PathBuf, progress: &mut dyn FnMut(f64) -> bool) -> Result<Vec<PathBuf>> {
+    let src = std::fs::File::open(input)?;
+    let mss = MediaSourceStream::new(Box::new(src), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = input.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut format = symphonia::default::get_probe()
+        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+        .map_err(|e| MediaError::Decode(e.to_string()))?;
+    // The tracks to decode: every audio track, or only the default one (for its channels).
+    let mut tracks: Vec<(u32, symphonia::core::codecs::audio::AudioCodecParameters)> = format
+        .tracks()
+        .iter()
+        .filter_map(|t| match &t.codec_params {
+            Some(CodecParameters::Audio(a)) => Some((t.id, a.clone())),
+            _ => None,
+        })
+        .collect();
+    if split == Split::Channels {
+        let d = format.default_track(TrackType::Audio).ok_or(MediaError::NoAudio)?.id;
+        tracks.retain(|(id, _)| *id == d);
+    }
+    if tracks.is_empty() {
+        return Err(MediaError::NoAudio);
+    }
+    let mut decoders = Vec::new();
+    for (_, p) in &tracks {
+        decoders.push(symphonia::default::get_codecs().make_audio_decoder(p, &Default::default()).map_err(|e| MediaError::Decode(e.to_string()))?);
+    }
+    // Parts are made when the first buffer shows the rate and the channel count.
+    let mut parts: Vec<Option<Vec<Part>>> = (0..tracks.len()).map(|_| None).collect();
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut interleaved: Vec<f32> = Vec::new();
+    let mut mono: Vec<f32> = Vec::new();
+    let mut seconds = 0.0f64;
+    let mut last_report = 0.0;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(Some(p)) => p,
+            Ok(None) => break,
+            Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(MediaError::Decode(e.to_string())),
+        };
+        let Some(ti) = tracks.iter().position(|(id, _)| *id == packet.track_id) else { continue };
+        let buf = match decoders[ti].decode(&packet) {
+            Ok(b) => b,
+            Err(SymError::DecodeError(_)) | Err(SymError::IoError(_)) => continue,
+            Err(e) => return Err(MediaError::Decode(e.to_string())),
+        };
+        let rate = buf.spec().rate();
+        let channels = buf.spec().channels().count().max(1);
+        if parts[ti].is_none() {
+            let n = if split == Split::Channels { channels } else { 1 };
+            let mut v = Vec::new();
+            for _ in 0..n {
+                let p = output(paths.len());
+                v.push(Part { to16: Some(To16k::new(rate)?), writer: wav_writer(&p)? });
+                paths.push(p);
+            }
+            parts[ti] = Some(v);
+        }
+        interleaved.resize(buf.samples_interleaved(), 0.0);
+        buf.copy_to_slice_interleaved(&mut interleaved[..]);
+        let list = parts[ti].as_mut().unwrap();
+        for (c, part) in list.iter_mut().enumerate() {
+            mono.clear();
+            if split == Split::Channels {
+                mono.extend(interleaved.chunks_exact(channels).map(|f| f[c]));
+            } else {
+                mono.extend(interleaved.chunks_exact(channels).map(|f| f.iter().sum::<f32>() / channels as f32));
+            }
+            let w = &mut part.writer;
+            part.to16.as_mut().unwrap().push(&mono, &mut |s: &[f32]| write_samples(w, s))?;
+        }
+        if ti == 0 {
+            seconds += (interleaved.len() / channels) as f64 / rate as f64;
+            if seconds - last_report >= 5.0 {
+                last_report = seconds;
+                if !progress(seconds) {
+                    return Err(MediaError::Cancelled);
+                }
+            }
+        }
+    }
+    for list in parts.into_iter().flatten() {
+        for mut part in list {
+            let w = &mut part.writer;
+            part.to16.as_mut().unwrap().finish(&mut |s: &[f32]| write_samples(w, s))?;
+            part.writer.finalize().map_err(|e| MediaError::Io(std::io::Error::other(e)))?;
+        }
+    }
+    Ok(paths)
+}
+
+/// Channels named in an FFmpeg stream line ("48000 Hz, stereo, fltp").
+fn ffmpeg_channels(line: &str) -> usize {
+    for part in line.split(',').map(str::trim) {
+        let n = match part {
+            "mono" => 1,
+            "stereo" => 2,
+            "2.1" | "3.0" => 3,
+            "quad" | "4.0" => 4,
+            "5.0" => 5,
+            "5.1" | "5.1(side)" | "6.0" => 6,
+            "7.1" => 8,
+            p if p.ends_with(" channels") => p.trim_end_matches(" channels").trim().parse().unwrap_or(0),
+            _ => 0,
+        };
+        if n > 0 {
+            return n;
+        }
+    }
+    0
+}
+
+fn split_ffmpeg(ffmpeg: &Path, input: &Path, split: Split, output: &dyn Fn(usize) -> PathBuf) -> Result<Vec<PathBuf>> {
+    let probe = no_window(std::process::Command::new(ffmpeg).args(["-hide_banner", "-nostdin", "-i"]).arg(input)).output()?;
+    let info = String::from_utf8_lossy(&probe.stderr).to_string();
+    let audio: Vec<&str> = info.lines().filter(|l| l.contains("Stream #") && l.contains("Audio:")).collect();
+    if audio.is_empty() {
+        return Err(MediaError::NoAudio);
+    }
+    let n = match split {
+        Split::Tracks => audio.len(),
+        Split::Channels => ffmpeg_channels(audio[0]),
+    };
+    let mut paths = Vec::new();
+    for k in 0..n {
+        let p = output(k);
+        let mut cmd = std::process::Command::new(ffmpeg);
+        cmd.args(["-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i"]).arg(input).arg("-vn");
+        match split {
+            Split::Tracks => cmd.args(["-map", &format!("0:a:{k}"), "-ac", "1"]),
+            Split::Channels => cmd.args(["-map", "0:a:0", "-af", &format!("pan=mono|c0=c{k}")]),
+        };
+        cmd.args(["-ar", "16000", "-c:a", "pcm_s16le", "-f", "wav"]).arg(&p);
+        let out = no_window(&mut cmd).output()?;
+        if !out.status.success() {
+            return Err(MediaError::Ffmpeg(String::from_utf8_lossy(&out.stderr).trim().to_string()));
+        }
+        paths.push(p);
+    }
+    Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +556,41 @@ mod tests {
             assert!((info.duration - 3.0).abs() < 0.2, "{info:?}");
         }
     }
+    #[test]
+    fn channels_split_into_one_copy_each() {
+        let d = tempfile::tempdir().unwrap();
+        let i = d.path().join("two-mics.wav");
+        // Left: a tone; right: silence.
+        let spec = hound::WavSpec { channels: 2, sample_rate: 44_100, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut w = hound::WavWriter::create(&i, spec).unwrap();
+        for k in 0..44_100 * 2 {
+            w.write_sample(((k as f64 * 0.06).sin() * 16_000.0) as i16).unwrap();
+            w.write_sample(0i16).unwrap();
+        }
+        w.finalize().unwrap();
+        let out = |k: usize| d.path().join(format!("part{k}.wav"));
+        let parts = split_16k(&i, Split::Channels, &out, None, &mut |_| true).unwrap();
+        assert_eq!(parts.len(), 2);
+        let (l, r) = (read16(&parts[0]), read16(&parts[1]));
+        assert_eq!(l.len(), 32_000);
+        assert_eq!(r.len(), 32_000);
+        assert!(l.iter().map(|x| x.abs()).fold(0.0, f32::max) > 0.3);
+        assert!(r.iter().all(|x| x.abs() < 1e-3), "the right channel stays silent");
+
+        // A mono file cannot be split.
+        let m = d.path().join("mono.wav");
+        tone(&m, 16_000, 1, 1.0);
+        assert!(matches!(split_16k(&m, Split::Channels, &out, None, &mut |_| true), Err(MediaError::NotSplittable(_))));
+        assert!(matches!(split_16k(&m, Split::Tracks, &out, None, &mut |_| true), Err(MediaError::NotSplittable(_))));
+    }
+
+    #[test]
+    fn ffmpeg_channel_names() {
+        assert_eq!(ffmpeg_channels("Stream #0:1: Audio: aac (LC), 48000 Hz, stereo, fltp, 128 kb/s"), 2);
+        assert_eq!(ffmpeg_channels("Stream #0:0: Audio: pcm_s16le, 48000 Hz, 4 channels, s16"), 4);
+        assert_eq!(ffmpeg_channels("Stream #0:0: Audio: opus, 48000 Hz, mono, fltp"), 1);
+    }
+
 }
 
 /// Waveform peaks for the editor: `per_second` pairs of (min, max) a second, scaled to -127..127, read from a 16 kHz
@@ -419,4 +652,5 @@ mod peak_tests {
         assert!(pk[1] > 55 && pk[0] < -55, "loud: {} {}", pk[0], pk[1]);
         assert!(pk[199] < 5 && pk[198] > -5, "quiet: {} {}", pk[198], pk[199]);
     }
+
 }

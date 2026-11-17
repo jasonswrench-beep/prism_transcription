@@ -8,8 +8,9 @@
 mod media_protocol;
 
 use prism_transcribe_core::edit::{self, FindOptions};
+use prism_transcribe_core::speakers;
 use prism_transcribe_core::export::ExportOptions;
-use prism_transcribe_core::model::{Transcript, Turn};
+use prism_transcribe_core::model::{Speaker, Transcript, Turn};
 use prism_transcribe_core::project::{ImportFields, MediaCheck, MediaFile, Project};
 use prism_transcribe_engine::{self as engine, ExportFormat, Progress, Settings};
 use prism_transcribe_speech::{install, models};
@@ -143,7 +144,7 @@ fn transcribe(app: tauri::AppHandle, state: State<AppState>, id: String) -> Res<
     {
         let mut busy = state.busy.lock().unwrap();
         if busy.is_some() {
-            return Err("Another job is running. Phase 1 transcribes one file at a time.".into());
+            return Err("Another job is running. Prism Transcribe works on one file at a time.".into());
         }
         *busy = Some((id.clone(), cancel.clone()));
     }
@@ -186,6 +187,7 @@ fn export(state: State<AppState>, id: String, path: String, options: ExportOptio
     engine::export(&p, &id, fmt, &out, &options).map_err(err)
 }
 
+/// The light pack's state at the top level (what the first-run panel needs), and the heavy pack's beside it.
 #[derive(Serialize)]
 struct ModelStatus {
     installed: bool,
@@ -193,18 +195,20 @@ struct ModelStatus {
     dir: String,
     pack: String,
     download_mb: u64,
+    heavy: engine::PackStatus,
 }
 
 #[tauri::command]
 fn models_status() -> ModelStatus {
-    let dir = Settings::load().model_dir();
-    let r = models::verify(&models::LIGHT_PACK, &dir, false);
+    let settings = Settings::load();
+    let light = engine::pack_status(&settings, &models::LIGHT_PACK);
     ModelStatus {
-        installed: r.is_ok(),
-        message: r.err().map(|e| e.to_string()).unwrap_or_default(),
-        dir: dir.display().to_string(),
-        pack: models::LIGHT_PACK.name.into(),
-        download_mb: install::LIGHT_PACK_DOWNLOADS.iter().map(|d| d.bytes).sum::<u64>() / 1_000_000,
+        installed: light.installed,
+        message: light.message,
+        dir: settings.model_dir().display().to_string(),
+        pack: light.name,
+        download_mb: light.download_mb,
+        heavy: engine::pack_status(&settings, &models::HEAVY_PACK),
     }
 }
 
@@ -216,8 +220,9 @@ struct InstallEvent {
 }
 
 #[tauri::command]
-fn models_install(app: tauri::AppHandle, state: State<AppState>) -> Res<()> {
+fn models_install(app: tauri::AppHandle, state: State<AppState>, pack: Option<String>) -> Res<()> {
     let settings = Settings::load();
+    let (pack, downloads) = install::downloads_for(pack.as_deref().unwrap_or("light-1")).ok_or("There is no such model pack.")?;
     if settings.offline {
         return Err(install::InstallError::Offline.to_string());
     }
@@ -231,7 +236,7 @@ fn models_install(app: tauri::AppHandle, state: State<AppState>) -> Res<()> {
     }
     std::thread::spawn(move || {
         let mut last = 0u64;
-        let r = install::install_light_pack(&settings.model_dir(), settings.offline, &mut |p| {
+        let r = install::install(pack, downloads, &settings.model_dir(), settings.offline, &mut |p| {
             if p.pack_done - last >= 2_000_000 || p.pack_done == p.pack_total {
                 last = p.pack_done;
                 let _ = app.emit("install", InstallEvent { progress: Some(p), finished: false, error: None });
@@ -247,8 +252,9 @@ fn models_install(app: tauri::AppHandle, state: State<AppState>) -> Res<()> {
 }
 
 #[tauri::command]
-fn models_import_zip(path: String) -> Res<ModelStatus> {
-    install::import_zip(&models::LIGHT_PACK, path.as_ref(), &Settings::load().model_dir()).map_err(err)?;
+fn models_import_zip(path: String, pack: Option<String>) -> Res<ModelStatus> {
+    let (pack, _) = install::downloads_for(pack.as_deref().unwrap_or("light-1")).ok_or("There is no such model pack.")?;
+    install::import_zip(pack, path.as_ref(), &Settings::load().model_dir()).map_err(err)?;
     Ok(models_status())
 }
 
@@ -346,6 +352,78 @@ fn notation_set(state: State<AppState>, list: Vec<String>) -> Res<Vec<String>> {
     Ok(list)
 }
 
+// ---- Speakers (T3) ----
+
+/// One speaker operation on the editor's current speakers and turns.
+#[derive(serde::Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+enum SpeakerOp {
+    /// Split a turn before a word.
+    Split { turn: usize, word: usize },
+    /// Give a turn, or its words `from..to`, to a speaker.
+    Reassign { turn: usize, from: Option<usize>, to: Option<usize>, speaker: String },
+    /// Join a turn onto the one before it.
+    JoinPrevious { turn: usize },
+    /// Merge one speaker into another.
+    Merge { from: String, into: String },
+    Add,
+    /// Remove a speaker who has no turns.
+    Remove { id: String },
+}
+
+#[derive(Serialize)]
+struct SpeakerEdit {
+    speakers: Vec<Speaker>,
+    turns: Vec<Turn>,
+    /// The turn the cursor belongs in afterwards, and whether anything changed.
+    turn: Option<usize>,
+    changed: bool,
+}
+
+#[tauri::command]
+fn speakers_edit(op: SpeakerOp, mut speakers: Vec<Speaker>, mut turns: Vec<Turn>) -> SpeakerEdit {
+    let (turn, changed) = match op {
+        SpeakerOp::Split { turn, word } => {
+            let ok = speakers::split_turn(&mut turns, turn, word);
+            (Some(if ok { turn + 1 } else { turn }), ok)
+        }
+        SpeakerOp::Reassign { turn, from, to, speaker } => {
+            let range = match (from, to) {
+                (Some(a), Some(b)) => Some(a..b),
+                _ => None,
+            };
+            let before = turns.clone();
+            let at = speakers::reassign(&mut turns, turn, range, &speaker);
+            (at, turns != before)
+        }
+        SpeakerOp::JoinPrevious { turn } => {
+            let ok = speakers::join_with_previous(&mut turns, turn);
+            (Some(turn.saturating_sub(if ok { 1 } else { 0 })), ok)
+        }
+        SpeakerOp::Merge { from, into } => (None, speakers::merge_speakers(&mut speakers, &mut turns, &from, &into)),
+        SpeakerOp::Add => {
+            speakers::add_speaker(&mut speakers);
+            (None, true)
+        }
+        SpeakerOp::Remove { id } => (None, speakers::remove_speaker(&mut speakers, &turns, &id)),
+    };
+    SpeakerEdit { speakers, turns, turn, changed }
+}
+
+#[tauri::command]
+fn speakers_stats(speakers: Vec<Speaker>, turns: Vec<Turn>) -> Vec<speakers::SpeakerStats> {
+    speakers::stats(&speakers, &turns)
+}
+
+/// Find the speakers again with an expected count, keeping the words as they are (T3). Takes a minute or two for an
+/// hour of recording, so it runs off the window's thread.
+#[tauri::command]
+async fn speakers_find_again(state: State<'_, AppState>, id: String, turns: Vec<Turn>, expected: Option<u32>) -> Res<SpeakerEdit> {
+    let dir = current(&state)?;
+    let (speakers, turns) = tauri::async_runtime::spawn_blocking(move || engine::find_speakers_again(&dir, &id, &turns, expected, &Settings::load()).map_err(err)).await.map_err(err)??;
+    Ok(SpeakerEdit { speakers, turns, turn: None, changed: true })
+}
+
 #[tauri::command]
 fn hotkeys_set(hotkeys: std::collections::BTreeMap<String, String>, rewind_on_resume: f64) -> Res<std::collections::BTreeMap<String, String>> {
     let mut s = Settings::load();
@@ -404,7 +482,10 @@ fn main() {
             replace_in_project,
             notation_set,
             hotkeys_set,
-            hotkeys_default
+            hotkeys_default,
+            speakers_edit,
+            speakers_stats,
+            speakers_find_again
         ])
         .run(tauri::generate_context!())
         .expect("Prism Transcribe could not start");

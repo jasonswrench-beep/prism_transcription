@@ -3,6 +3,37 @@
 Things the build sessions could not check themselves. Newest phase first. When one is done, delete it and note the
 result in the matching results file.
 
+## Phase 3
+
+- [ ] **Speakers, by hand.** In a transcript: open Speakers (Ctrl+Shift+P), name a speaker and give a role and an
+  attribute (site, age band); merge two speakers; in a turn, press Alt+1 or Alt+2 to give it to a speaker, select
+  some words and press Alt+2 to give just those; press Enter to split a turn and Backspace at a turn's start to join
+  it to the one above; use each turn's speaker menu ("New speaker..."). Undo (Ctrl+Z) after each. The build session
+  drove all of these through the debugging port on the two-speaker fixture and they worked; a person should judge
+  whether they feel right.
+- [ ] **Find the speakers again** on a real focus group where the first pass found the wrong number: set the count
+  in Speakers and press Find speakers again. Your typed corrections should survive; names start again (Undo brings
+  them back).
+- [ ] **A real two-microphone recording.** Transcribe a recording with one microphone per person (a two-lavalier
+  recorder writing left and right, or a file with one track per person) with Details > Advanced > "One channel per
+  person". Check that nobody's words appear twice (each microphone hears the others; the app silences each one
+  outside its own speaker) and that [crosstalk] marks real overlaps and not ordinary turn changes. Tested only on a
+  made-up file (`tools/make_tracks_fixture.py`: two voices, the other voice 18 dB down, one planted overlap), where
+  the result was right. Microphones whose levels differ a lot, and room echo, are the risk.
+- [ ] **Separate audio tracks in one file** (Details > Advanced > "One audio track per person"). Built and unit tested
+  for decoding, but no multi-track test file was at hand; an MKV or MP4 from a recorder that writes one track per
+  person is needed. Files symphonia cannot read go through FFmpeg (`-map 0:a:N`).
+- [ ] **The heavy pack on the graphics card, and its speed.** Phase 3 runs Whisper through a whisper-cli build for
+  the processor (`tools/build-whisper.bat`, whisper.cpp v1.9.5). On this computer's processor it took 1.1 minutes for
+  the one-minute fixture with the model loaded per batch; a 60-minute file was not timed. A Vulkan build
+  (`tools/build-whisper.bat <src> <out> vulkan`, needs the Vulkan SDK) should be timed on `interview-60.wav`; the
+  spec's target is under 10 minutes with a 6 GB card. Until then, Settings warns that the processor alone can take
+  longer than the recording.
+- [ ] **The heavy pack on another language.** Import a recording in a language the light pack does not cover (Details
+  > Language, for example ja), Transcribe, and check that the heavy pack is used and the words are right. Not tested:
+  no non-English recording was at hand. Whisper's word times are looser than Parakeet's (the editor says so).
+- [ ] **Screen reader on the speakers panel and each turn's speaker menu (NVDA).**
+
 ## Phase 2
 
 - [ ] **The phase's own test: correct a whole transcript with the keyboard only.** Open a transcribed recording (Edit),

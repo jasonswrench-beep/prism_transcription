@@ -24,6 +24,12 @@ Speech models (downloaded separately, never inside the installer; see docs/MODEL
   as converted to ONNX by sherpa-onnx. Changed on the user's computer by Prism Transcribe's installer: one
   metadata entry appended (feature_normalize_type = global-mean) so the runtime removes each utterance's mean.
 - Silero VAD, Copyright (c) 2020-present Silero Team, MIT licence.
+- Heavy pack (optional): Whisper large-v3-turbo by OpenAI, MIT licence, in whisper.cpp's format
+  (https://huggingface.co/ggerganov/whisper.cpp).
+
+Separate programs run by Prism Transcribe (not linked into it):
+
+- whisper.cpp's whisper-cli (MIT licence, https://github.com/ggml-org/whisper.cpp), for the heavy pack.
 
 Code built into the program:
 

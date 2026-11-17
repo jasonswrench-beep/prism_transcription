@@ -202,6 +202,229 @@ pub fn turns(words: Vec<Word>, speakers: &[u32]) -> Vec<Turn> {
     out
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// One microphone per person (T1: each track becomes a known speaker, which skips diarization)
+// ---------------------------------------------------------------------------------------------------------
+
+/// Frames of 20 ms for comparing microphones.
+pub const MASK_FRAME: usize = 320;
+
+/// For each track, which 20 ms frames are its own speaker talking rather than another voice heard through it.
+///
+/// Every microphone hears everyone, more quietly ("bleed"). A frame belongs to a track when that track is within
+/// `margin_db` of the loudest track at that moment, after the microphones' gains are evened out (measured from the
+/// bleed, below), so a hot microphone does not win every frame. Two people
+/// talking at once are both within the margin on their own microphones, so both keep the frame: that is how
+/// crosstalk survives. Short holes are closed and the result widened by 0.2 s so words are not clipped.
+pub fn dominance_masks(tracks: &[&[f32]], margin_db: f32) -> Vec<Vec<bool>> {
+    let frames = tracks.iter().map(|t| t.len() / MASK_FRAME).min().unwrap_or(0);
+    let rms: Vec<Vec<f32>> = tracks
+        .iter()
+        .map(|t| (0..frames).map(|f| (t[f * MASK_FRAME..(f + 1) * MASK_FRAME].iter().map(|x| x * x).sum::<f32>() / MASK_FRAME as f32).sqrt()).collect())
+        .collect();
+    // Put the microphones on one scale by their gain, measured from the bleed itself. Where track j alone is
+    // talking, track k hears it at (gain k / gain j) times the room's coupling; where k alone is talking, j hears it
+    // at (gain j / gain k) times the same coupling. Half the difference of the two (in logs) is the gain difference,
+    // whatever the room, and whoever talks louder or longer. Track 0 is the reference; a pair with too few frames
+    // each way is left at equal gain.
+    let median = |mut v: Vec<f32>| -> Option<f32> {
+        if v.len() < 25 {
+            return None;
+        }
+        v.sort_by(|a, b| a.total_cmp(b));
+        Some(v[v.len() / 2])
+    };
+    let alone = |j: usize, f: usize| rms[j][f] > 1e-4 && (0..tracks.len()).all(|i| i == j || rms[j][f] >= 2.0 * rms[i][f]);
+    let scale: Vec<f32> = (0..tracks.len())
+        .map(|k| {
+            if k == 0 {
+                return 1.0;
+            }
+            let heard_by_k = median((0..frames).filter(|&f| alone(0, f) && rms[k][f] > 0.0).map(|f| rms[k][f] / rms[0][f]).collect());
+            let heard_by_0 = median((0..frames).filter(|&f| alone(k, f) && rms[0][f] > 0.0).map(|f| rms[0][f] / rms[k][f]).collect());
+            match (heard_by_k, heard_by_0) {
+                (Some(a), Some(b)) if a > 0.0 && b > 0.0 => (a / b).sqrt(),
+                _ => 1.0,
+            }
+        })
+        .collect();
+    // Each microphone's noise floor (its quietest tenth): a frame is only someone talking on that microphone when it
+    // is 12 dB above it, so the pauses between words are not "everyone at once".
+    let floor: Vec<f32> = rms
+        .iter()
+        .map(|r| {
+            let mut v = r.clone();
+            v.sort_by(|a, b| a.total_cmp(b));
+            v.get(v.len() / 10).copied().unwrap_or(0.0).max(1e-5)
+        })
+        .collect();
+    let ratio = 10f32.powf(-margin_db / 20.0);
+    let mut masks = vec![vec![false; frames]; tracks.len()];
+    for f in 0..frames {
+        let level: Vec<f32> = (0..tracks.len()).map(|k| rms[k][f] / scale[k]).collect();
+        let loudest = level.iter().copied().fold(0.0f32, f32::max);
+        for k in 0..tracks.len() {
+            masks[k][f] = rms[k][f] > 4.0 * floor[k] && level[k] >= loudest * ratio;
+        }
+    }
+    let close = 15; // 0.3 s
+    let widen = 10; // 0.2 s
+    for m in &mut masks {
+        // Close holes no longer than `close` frames.
+        let mut last_on: Option<usize> = None;
+        for f in 0..m.len() {
+            if m[f] {
+                if let Some(l) = last_on {
+                    if f - l > 1 && f - l <= close {
+                        m[l..f].iter_mut().for_each(|x| *x = true);
+                    }
+                }
+                last_on = Some(f);
+            }
+        }
+        let orig = m.clone();
+        for f in 0..m.len() {
+            if orig[f] {
+                let (a, b) = (f.saturating_sub(widen), (f + widen + 1).min(m.len()));
+                m[a..b].iter_mut().for_each(|x| *x = true);
+            }
+        }
+    }
+    masks
+}
+
+/// `samples` with every frame outside `mask` silenced (with a 20 ms fade either side), so a recognizer given a chunk
+/// of one microphone does not hear the other people through it. Frames past the mask's end are silenced too.
+pub fn apply_mask(samples: &[f32], mask: &[bool]) -> Vec<f32> {
+    let mut out = vec![0.0f32; samples.len()];
+    let n = MASK_FRAME;
+    for (f, on) in mask.iter().enumerate() {
+        if !*on {
+            continue;
+        }
+        let (a, b) = (f * n, ((f + 1) * n).min(samples.len()));
+        let fade_in = f == 0 || !mask[f - 1];
+        let fade_out = f + 1 >= mask.len() || !mask[f + 1];
+        for i in a..b {
+            let k = (i - a) as f32 / n as f32;
+            let g = match (fade_in, fade_out) {
+                (true, true) => (k * 2.0).min((1.0 - k) * 2.0).min(1.0),
+                (true, false) => k,
+                (false, true) => 1.0 - k,
+                _ => 1.0,
+            };
+            out[i] = samples[i] * g;
+        }
+    }
+    out
+}
+
+/// The parts of `spans` where `mask` is on, dropping pieces shorter than `min_len` seconds.
+pub fn mask_spans(spans: &[SpeechSpan], mask: &[bool], min_len: f64) -> Vec<SpeechSpan> {
+    let fs = MASK_FRAME as f64 / crate::SAMPLE_RATE as f64;
+    let mut out = Vec::new();
+    for s in spans {
+        let a = (s.start / fs).floor().max(0.0) as usize;
+        let b = ((s.end / fs).ceil() as usize).min(mask.len());
+        let mut run: Option<usize> = None;
+        for f in a..=b {
+            let on = f < b && mask[f];
+            match (on, run) {
+                (true, None) => run = Some(f),
+                (false, Some(r)) => {
+                    let piece = SpeechSpan { start: (r as f64 * fs).max(s.start), end: (f as f64 * fs).min(s.end) };
+                    if piece.end - piece.start >= min_len {
+                        out.push(piece);
+                    }
+                    run = None;
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+/// The marker written where two people talk at once (T3).
+pub const CROSSTALK: &str = "[crosstalk]";
+
+fn marker(t: f64) -> Word {
+    Word { text: CROSSTALK.into(), start: t, end: t, confidence: 1.0 }
+}
+
+/// Turns from one list of words per track (track `k` is speaker `k`).
+///
+/// Each track's words are cut into utterances at pauses of `gap` seconds and the utterances are put in order of
+/// their start. Where one starts while another speaker's is still going (that speaker says another word after it
+/// starts, and the two overlap by at least `min_overlap` seconds), the one already going is cut there and carries on after the newcomer, and the newcomer's overlapped words are put
+/// between two [crosstalk] markers, at the overlap's start and its end:
+///
+/// ```text
+/// Speaker 1: So what I was
+/// Speaker 2: [crosstalk] Sorry, go on. [crosstalk]
+/// Speaker 1: saying is that ...
+/// ```
+///
+/// Each word keeps one speaker. Turns are in order of their start; a turn can start before the one above it ends.
+pub fn turns_from_tracks(tracks: Vec<Vec<Word>>, gap: f64, min_overlap: f64) -> Vec<Turn> {
+    let mut queue: Vec<Turn> = Vec::new();
+    for (k, mut words) in tracks.into_iter().enumerate() {
+        words.sort_by(|a, b| a.start.total_cmp(&b.start));
+        for w in words {
+            match queue.last_mut() {
+                Some(t) if t.speaker == k as u32 && w.start - t.end < gap => {
+                    t.end = t.end.max(w.end);
+                    t.words.push(w);
+                }
+                _ => queue.push(Turn { speaker: k as u32, start: w.start, end: w.end, words: vec![w] }),
+            }
+        }
+    }
+    // Earliest start last, so `pop` takes it. The flag marks the rest of a turn that was cut: it carries on after
+    // the newcomer and never cuts anything itself (or the two would cut each other for ever).
+    let mut queue: Vec<(Turn, bool)> = queue.into_iter().map(|t| (t, false)).collect();
+    queue.sort_by(|(a, _), (b, _)| b.start.total_cmp(&a.start).then(b.speaker.cmp(&a.speaker)));
+    let mut out: Vec<Turn> = Vec::new();
+    while let Some((mut u, resumed)) = queue.pop() {
+        if let (false, Some(prev)) = (resumed, out.last_mut()) {
+            let overlap_end = prev.end.min(u.end);
+            // Crosstalk is the other person still saying words after the newcomer starts, not only a last word whose
+            // end time runs on.
+            let at = prev.words.iter().position(|w| w.start >= u.start).unwrap_or(prev.words.len());
+            let still_talking = prev.words.get(at).is_some_and(|w| w.start < u.end);
+            if prev.speaker != u.speaker && still_talking && overlap_end - u.start >= min_overlap {
+                // Cut the turn already going where the newcomer starts; the rest waits in the queue.
+                let rest: Vec<Word> = prev.words.split_off(at);
+                if let Some(l) = prev.words.last() {
+                    prev.end = prev.words.iter().map(|w| w.end).fold(l.end, f64::max);
+                }
+                if !rest.is_empty() {
+                    let r = Turn { speaker: prev.speaker, start: rest[0].start, end: rest.iter().map(|w| w.end).fold(0.0, f64::max), words: rest };
+                    // Keep the queue sorted with the earliest start last.
+                    let pos = queue.iter().position(|(q, _)| q.start < r.start || (q.start == r.start && q.speaker < r.speaker)).unwrap_or(queue.len());
+                    queue.insert(pos, (r, true));
+                }
+                let end_at = u.words.iter().position(|w| w.start >= overlap_end).unwrap_or(u.words.len());
+                let start_t = u.start;
+                u.words.insert(end_at, marker(overlap_end));
+                u.words.insert(0, marker(start_t));
+                u.end = u.end.max(overlap_end);
+                if prev.words.is_empty() {
+                    out.pop();
+                }
+            }
+        }
+        match out.last_mut() {
+            Some(t) if t.speaker == u.speaker => {
+                t.end = t.end.max(u.end);
+                t.words.extend(u.words);
+            }
+            _ => out.push(u),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,5 +510,60 @@ mod tests {
         assert_eq!(t.len(), 2);
         assert_eq!(t[0].text(), "one two");
         assert_eq!(t[1].text(), "three four five");
+    }
+
+    fn w(t: &str, a: f64, b: f64) -> Word {
+        Word { text: t.into(), start: a, end: b, confidence: 0.9 }
+    }
+
+    #[test]
+    fn bleed_from_another_microphone_is_not_its_speaker() {
+        // Track 0 speaks for the first second, track 1 for the second; each microphone hears the other at -20 dB.
+        let n = 32_000;
+        let tone = |i: usize| (i as f32 * 0.05).sin() * 0.5;
+        let a: Vec<f32> = (0..n).map(|i| if i < 16_000 { tone(i) } else { tone(i) * 0.1 }).collect();
+        let b: Vec<f32> = (0..n).map(|i| if i >= 16_000 { tone(i) } else { tone(i) * 0.1 }).collect();
+        let m = dominance_masks(&[&a, &b], 10.0);
+        let on = |k: usize, t: f64| m[k][(t * 50.0) as usize];
+        assert!(on(0, 0.5) && !on(1, 0.5), "the first second is track 0's");
+        assert!(!on(0, 1.5) && on(1, 1.5), "the second second is track 1's");
+        // Both talking at once for the first second (then a quiet room): both keep those frames.
+        let c: Vec<f32> = (0..n).map(|i| if i < 16_000 { tone(i) } else { tone(i) * 0.002 }).collect();
+        let m2 = dominance_masks(&[&c, &c], 10.0);
+        assert!(m2[0][25] && m2[1][25]);
+        assert!(!m2[0][90] && !m2[1][90], "the quiet room is nobody's");
+
+        let gated = apply_mask(&a, &m[0]);
+        assert_eq!(gated[8_000], a[8_000], "its own speech passes untouched");
+        assert!(gated[28_000..].iter().all(|x| *x == 0.0), "the other voice, heard through it, is silenced");
+        let spans = [SpeechSpan { start: 0.2, end: 1.8 }];
+        let kept = mask_spans(&spans, &m[0], 0.25);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].start == 0.2 && (kept[0].end - 1.2).abs() < 0.05, "{kept:?}");
+    }
+
+    #[test]
+    fn tracks_become_turns_with_crosstalk_marked() {
+        let a = vec![w("So", 0.0, 0.3), w("what", 0.4, 0.6), w("I", 0.7, 0.8), w("was", 0.9, 1.1), w("saying", 1.6, 2.0), w("is", 2.1, 2.3), w("this.", 2.4, 2.8), w("Next", 6.0, 6.3)];
+        let b = vec![w("Sorry,", 1.2, 1.5), w("go", 1.6, 1.8), w("on.", 1.9, 2.2), w("Okay.", 4.0, 4.4)];
+        let t = turns_from_tracks(vec![a, b], 1.0, 0.3);
+        let text: Vec<(u32, String)> = t.iter().map(|x| (x.speaker, x.text())).collect();
+        assert_eq!(
+            text,
+            [
+                (0, "So what I was".to_string()),
+                (1, "[crosstalk] Sorry, go on. [crosstalk]".to_string()),
+                (0, "saying is this.".to_string()),
+                (1, "Okay.".to_string()),
+                (0, "Next".to_string()),
+            ]
+        );
+        assert!(t.windows(2).all(|p| p[0].start <= p[1].start), "turns in order of their start");
+        // A brief touch (under the minimum) is not crosstalk.
+        let t = turns_from_tracks(vec![vec![w("Yes.", 0.0, 1.0)], vec![w("Right.", 0.9, 1.5)]], 1.0, 0.3);
+        assert_eq!(t.iter().map(|x| x.text()).collect::<Vec<_>>(), ["Yes.", "Right."]);
+        // Nor is a last word whose end time runs on into the next speaker's first.
+        let t = turns_from_tracks(vec![vec![w("I", 0.0, 0.2), w("agree.", 0.3, 1.6)], vec![w("Good.", 1.0, 1.5)]], 1.0, 0.3);
+        assert_eq!(t.iter().map(|x| x.text()).collect::<Vec<_>>(), ["I agree.", "Good."]);
     }
 }

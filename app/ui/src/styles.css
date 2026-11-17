@@ -179,3 +179,26 @@ mark.unsure { background: var(--mark); color: var(--mark-text); border-radius: 2
 .keys-table th { text-align: left; font-weight: normal; padding: 0.25rem 0.5rem 0.25rem 0; }
 .keys-table td { padding: 0.25rem 0.4rem; font-variant-numeric: tabular-nums; }
 .keys-table td.clash { color: var(--danger); font-weight: 600; }
+
+/* ---- Speakers (phase 3) ---- */
+.turn-head select.who { font: inherit; font-weight: 600; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0.1rem 0.15rem; max-width: 9.2rem; text-overflow: ellipsis; cursor: pointer; appearance: none; }
+.turn-head select.who:hover, .turn-head select.who:focus-visible { border-color: var(--line); background: var(--bg); appearance: auto; }
+.turn-head select.who:focus-visible { outline: 2px solid var(--focus); }
+.react-aria-Modal.wide { width: min(46rem, 94vw); }
+.speaker-cards { display: grid; gap: 0.7rem; margin: 0.6rem 0; }
+.speaker-card { border: 1px solid var(--line); border-left: 6px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; display: grid; gap: 0.5rem; }
+.speaker-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; }
+.speaker-card-head .hint { margin: 0; font-size: 0.9em; }
+.speaker-fields { display: grid; grid-template-columns: 1fr 11rem; gap: 0.6rem; align-items: end; }
+.field { display: grid; gap: 0.2rem; }
+.field.inline { display: flex; align-items: center; gap: 0.4rem; }
+.field select, .attribute-row input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.3rem 0.4rem; }
+.attributes { border: 0; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.attributes legend { color: var(--muted); font-size: 0.9em; margin-bottom: 0.2rem; }
+.attributes > button { justify-self: start; }
+.attribute-row { display: grid; grid-template-columns: 10rem 1fr auto; gap: 0.4rem; }
+.find-again { border-top: 1px solid var(--line); margin-top: 0.6rem; padding-top: 0.4rem; }
+.find-again h3 { margin: 0.3rem 0; font-size: 1rem; }
+.advanced { border-left: 3px solid var(--line); padding-left: 0.7rem; display: grid; gap: 0.6rem; }
+.heavy { border-top: 1px solid var(--line); margin-top: 0.6rem; padding-top: 0.2rem; }
+.heavy h3 { margin: 0.4rem 0; font-size: 1rem; }

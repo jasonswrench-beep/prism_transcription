@@ -68,6 +68,32 @@ pub struct ImportFields {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// The Advanced panel (T2): which model pack to use, `light-1` or `heavy-1`; `None` picks the light pack, or the
+    /// heavy one when the language is outside the light pack's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
+    /// One microphone per person (T1): transcribe track by track, or channel by channel, each a known speaker.
+    #[serde(default, skip_serializing_if = "TrackMode::is_mixed")]
+    pub tracks: TrackMode,
+}
+
+/// How the people in a recording are separated.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackMode {
+    /// Everyone in one mix: speakers are found by diarization.
+    #[default]
+    Mixed,
+    /// One audio track per person.
+    Tracks,
+    /// One channel per person (a two-microphone recorder's left and right, a multichannel WAV).
+    Channels,
+}
+
+impl TrackMode {
+    pub fn is_mixed(&self) -> bool {
+        *self == TrackMode::Mixed
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -84,6 +110,12 @@ pub struct MediaFile {
     pub duration: f64,
     #[serde(default)]
     pub has_video: bool,
+    /// How many audio tracks the file has, and the first track's channels (0 when not known), so the Advanced panel
+    /// can offer to transcribe one microphone at a time.
+    #[serde(default)]
+    pub audio_tracks: u32,
+    #[serde(default)]
+    pub channels: u32,
     pub imported: String,
     #[serde(default)]
     pub status: MediaStatus,
@@ -244,7 +276,7 @@ impl Project {
         if fields.label.trim().is_empty() {
             fields.label = original.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| id.clone());
         }
-        self.file.files.push(MediaFile { id: id.clone(), fields, source, copied: copy, sha256, bytes, duration: 0.0, has_video: false, imported: now(), status: MediaStatus::Imported, error: None });
+        self.file.files.push(MediaFile { id: id.clone(), fields, source, copied: copy, sha256, bytes, duration: 0.0, has_video: false, audio_tracks: 0, channels: 0, imported: now(), status: MediaStatus::Imported, error: None });
         self.save()?;
         Ok(id)
     }

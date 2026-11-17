@@ -33,6 +33,13 @@ export interface Located {
 export function timeline(turns: Turn[]): { start: number; end: number; turn: number; word: number }[] {
   const out: { start: number; end: number; turn: number; word: number }[] = [];
   turns.forEach((t, ti) => t.words.forEach((w, wi) => out.push({ start: w.start, end: w.end, turn: ti, word: wi })));
+  // Turns transcribed track by track can overlap in time (crosstalk), so order by time for the search.
+  for (let i = 1; i < out.length; i++) {
+    if (out[i].start < out[i - 1].start) {
+      out.sort((a, b) => a.start - b.start);
+      break;
+    }
+  }
   return out;
 }
 

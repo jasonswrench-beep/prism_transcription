@@ -45,6 +45,19 @@ pub const LIGHT_PACK: ModelPack = ModelPack {
     ],
 };
 
+/// Whisper large-v3-turbo for whisper.cpp (MIT), in the shared folder as its publisher names it.
+pub const WHISPER_MODEL: &str = "ggml-large-v3-turbo.bin";
+
+/// The heavy optional pack (graphics card recommended): Whisper large-v3-turbo for about 99 languages, run by
+/// whisper.cpp ([`crate::whisper`]). It recognizes speech only; voice detection and speaker labels come from the
+/// light pack, which must be installed too. Phase 0 found no reason to add community-1 (docs/PHASE0-RESULTS.md):
+/// its embedding is the light pack's.
+pub const HEAVY_PACK: ModelPack = ModelPack {
+    id: "heavy-1",
+    name: "Heavy pack (Whisper large-v3-turbo on whisper.cpp)",
+    files: &[ModelFile { path: WHISPER_MODEL, bytes: 1_624_555_275, sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69" }],
+};
+
 /// The 25 languages Parakeet TDT 0.6B v3 recognizes (its model card).
 pub const PARAKEET_LANGUAGES: &[&str] = &[
     "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "sk",

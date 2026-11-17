@@ -5,7 +5,7 @@
 //! set (the Offline switch): that check comes before any connection. Downloads land in `downloads/` beside the
 //! models as `.part` files and are kept only if size and SHA-256 match exactly.
 
-use crate::models::{self, ModelPack, LIGHT_PACK};
+use crate::models::{self, ModelPack, HEAVY_PACK, LIGHT_PACK};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -83,6 +83,24 @@ pub const LIGHT_PACK_DOWNLOADS: &[Download] = &[
         unpack: Unpack::AppendOnnxMetadata { key: "feature_normalize_type", value: "global-mean", dest: models::EMBEDDING_FILE },
     },
 ];
+
+/// Where the heavy pack comes from: whisper.cpp's own model repository (MIT; docs/MODELS.md).
+pub const HEAVY_PACK_DOWNLOADS: &[Download] = &[Download {
+    url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+    file: "ggml-large-v3-turbo.bin",
+    bytes: 1_624_555_275,
+    sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
+    unpack: Unpack::File { dest: models::WHISPER_MODEL },
+}];
+
+/// A pack and where its files come from.
+pub fn downloads_for(pack_id: &str) -> Option<(&'static ModelPack, &'static [Download])> {
+    match pack_id {
+        "light-1" => Some((&LIGHT_PACK, LIGHT_PACK_DOWNLOADS)),
+        "heavy-1" => Some((&HEAVY_PACK, HEAVY_PACK_DOWNLOADS)),
+        _ => None,
+    }
+}
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct InstallProgress {
@@ -164,7 +182,11 @@ fn fetch(agent: &ureq::Agent, d: &Download, part: &Path, progress: &mut dyn FnMu
 fn unpack(d: &Download, file: &Path, model_dir: &Path) -> Result<()> {
     match &d.unpack {
         Unpack::File { dest } => {
-            std::fs::copy(file, model_dir.join(dest))?;
+            // The download folder is removed after the install, so move rather than copy (1.6 GB for Whisper).
+            let to = model_dir.join(dest);
+            if std::fs::rename(file, &to).is_err() {
+                std::fs::copy(file, &to)?;
+            }
         }
         Unpack::TarBz2 { members } => {
             let mut ar = tar::Archive::new(bzip2::read::BzDecoder::new(std::fs::File::open(file)?));
@@ -208,6 +230,13 @@ pub fn install(pack: &ModelPack, downloads: &[Download], model_dir: &Path, offli
     let pack_total: u64 = downloads.iter().map(|d| d.bytes).sum();
     let mut pack_done = 0u64;
     for d in downloads {
+        if let Unpack::File { dest } = d.unpack {
+            let to = model_dir.join(dest);
+            if std::fs::metadata(&to).map(|m| m.len() == d.bytes).unwrap_or(false) && models::sha256_file(&to)? == d.sha256 {
+                pack_done += d.bytes;
+                continue; // already in place from an earlier try
+            }
+        }
         let kept = dl_dir.join(d.file);
         let have = std::fs::metadata(&kept).map(|m| m.len() == d.bytes).unwrap_or(false) && models::sha256_file(&kept)? == d.sha256;
         if !have {

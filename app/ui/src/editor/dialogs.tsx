@@ -1,7 +1,7 @@
 // The editor's dialogs: find and replace, the notation menu, snapshots, and the hotkey remap screen.
 import { useEffect, useRef, useState } from 'react';
 import { Button, Checkbox, Dialog, Heading, Input, Label, ListBox, ListBoxItem, Modal, ModalOverlay, Radio, RadioGroup, TextField } from 'react-aria-components';
-import type { Snapshot } from '../api';
+import { api, type Snapshot } from '../api';
 import { ACTION_LABELS, clashes, keyName, showKey, type Action } from './keys';
 import type { FindOptions } from './words';
 
@@ -216,7 +216,7 @@ export function HotkeysDialog(props: { isOpen: boolean; keys: Record<string, str
             <Input inputMode="decimal" />
           </TextField>
           <div className="row end">
-            <Button onPress={() => import('../api').then(({ api }) => api.defaultHotkeys().then(setKeys))}>Reset to defaults</Button>
+            <Button onPress={() => api.defaultHotkeys().then(setKeys)}>Reset to defaults</Button>
             <Button onPress={props.onClose}>Cancel</Button>
             <Button className="primary" isDisabled={clash.length > 0 || !(r >= 0 && r <= 10)} onPress={() => props.onSave(keys, r)}>
               Save

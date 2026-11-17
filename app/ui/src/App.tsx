@@ -1,4 +1,5 @@
-// Prism Transcribe, phase 1: projects, import, transcribe with progress, a read-only transcript, export, models.
+// Prism Transcribe: projects, import, transcribe with progress, a read-only transcript, export, models. The editor is
+// editor/Editor.tsx.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -31,6 +32,7 @@ import {
   type ProjectView,
   type Settings,
   type Transcript,
+  type TrackMode,
 } from './api';
 import { duration, hms, LOW_CONFIDENCE, progressText } from './format';
 import { Editor } from './editor/Editor';
@@ -62,6 +64,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<{ file: MediaFile; transcript: Transcript } | null>(null);
   const [exporting, setExporting] = useState<MediaFile | null>(null);
+  const [details, setDetails] = useState<MediaFile | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -96,7 +99,7 @@ export function App() {
       on<InstallEvent>('install', (e) => {
         setInstall(e.finished ? null : e);
         if (e.finished) {
-          setNotice(e.error ? `The models were not installed: ${e.error}` : 'The speech models are installed and checked.');
+          setNotice(e.error ? `The models were not installed: ${e.error}` : 'The models are installed and checked.');
           api.modelsStatus().then(setModels);
         }
       }),
@@ -234,6 +237,7 @@ export function App() {
                     onCancel={() => api.cancel()}
                     onExport={() => setExporting(f)}
                     onEdit={() => openEditor(f)}
+                    onDetails={() => setDetails(f)}
                   />
                 ))}
               </ul>
@@ -277,10 +281,11 @@ export function App() {
         }}
         onError={setNotice}
       />
-      <ImportDialog
+      <FieldsDialog
         paths={importPaths}
+        file={null}
         onClose={() => setImportPaths(null)}
-        onImport={async (fields, copy) => {
+        onSave={async (fields, copy) => {
           const paths = importPaths ?? [];
           setImportPaths(null);
           setImporting((n) => n + paths.length);
@@ -288,6 +293,20 @@ export function App() {
             await api.importMedia(paths, fields, copy);
           } catch (e) {
             setImporting(0);
+            setNotice(message(e));
+          }
+        }}
+      />
+      <FieldsDialog
+        paths={null}
+        file={details}
+        onClose={() => setDetails(null)}
+        onSave={async (fields) => {
+          const f = details!;
+          setDetails(null);
+          try {
+            setProject(await api.updateMedia(f.id, { ...fields, label: fields.label || f.label }));
+          } catch (e) {
             setNotice(message(e));
           }
         }}
@@ -305,6 +324,9 @@ export function App() {
         isOpen={settingsOpen}
         settings={settings}
         models={models}
+        install={install}
+        onNotice={setNotice}
+        onModels={setModels}
         onClose={() => setSettingsOpen(false)}
         onSave={async (s) => {
           setSettings(await api.saveSettings(s));
@@ -327,6 +349,7 @@ function FileRow(props: {
   onCancel: () => void;
   onExport: () => void;
   onEdit: () => void;
+  onDetails: () => void;
 }) {
   const { file: f, job } = props;
   const p = progressText(job?.progress ?? null);
@@ -338,7 +361,9 @@ function FileRow(props: {
         <span className="file-meta">
           {duration(f.duration)}
           {f.has_video ? ' · video' : ''}
-          {f.expected_speakers ? ` · ${f.expected_speakers} speakers expected` : ''} · {job ? 'Transcribing' : STATUS_WORDS[f.status]}
+          {f.expected_speakers ? ` · ${f.expected_speakers} speakers expected` : ''}
+          {f.tracks && f.tracks !== 'mixed' ? ` · one ${f.tracks === 'tracks' ? 'track' : 'channel'} per person` : ''}
+          {f.pack === 'heavy-1' ? ' · heavy pack' : ''} · {job ? 'Transcribing' : STATUS_WORDS[f.status]}
         </span>
       </Button>
       {job ? (
@@ -366,6 +391,9 @@ function FileRow(props: {
             {done ? 'Transcribe again' : 'Transcribe'}
           </Button>
           <Button isDisabled={!done} onPress={props.onExport}>Export…</Button>
+          <Button isDisabled={props.busy} onPress={props.onDetails} aria-label={`Details of ${f.label}`}>
+            Details…
+          </Button>
         </div>
       )}
       {f.status === 'failed' && f.error && <p className="error">{f.error}</p>}
@@ -507,30 +535,54 @@ function NewProjectDialog(props: { isOpen: boolean; onClose: () => void; onCreat
   );
 }
 
-function ImportDialog(props: { paths: string[] | null; onClose: () => void; onImport: (f: ImportFields, copy: boolean) => void }) {
+const TRACK_WORDS: Record<TrackMode, string> = {
+  mixed: 'Everyone in one mix: find the speakers',
+  tracks: 'One audio track per person: each track is one speaker',
+  channels: 'One channel per person (left and right microphones): each channel is one speaker',
+};
+
+/** The per-file fields (T1), for an import or for a file already in the project ("Details"), with the Advanced
+ * panel (T2): which pack, and one microphone per person. */
+function FieldsDialog(props: { paths: string[] | null; file: MediaFile | null; onClose: () => void; onSave: (f: ImportFields, copy: boolean) => void }) {
   const [label, setLabel] = useState('');
   const [date, setDate] = useState('');
   const [interviewer, setInterviewer] = useState('');
   const [speakers, setSpeakers] = useState<number>(NaN);
+  const [language, setLanguage] = useState('');
   const [note, setNote] = useState('');
+  const [pack, setPack] = useState('auto');
+  const [tracks, setTracks] = useState<TrackMode>('mixed');
   const [copy, setCopy] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const isOpen = !!props.paths || !!props.file;
   const many = (props.paths?.length ?? 0) > 1;
+  const f = props.file;
   useEffect(() => {
-    if (props.paths) {
-      setLabel('');
-      setDate('');
-      setInterviewer('');
-      setSpeakers(NaN);
-      setNote('');
-      setCopy(false);
-    }
-  }, [props.paths]);
+    if (!isOpen) return;
+    setLabel(f?.label ?? '');
+    setDate(f?.date ?? '');
+    setInterviewer(f?.interviewer ?? '');
+    setSpeakers(f?.expected_speakers ?? NaN);
+    setLanguage(f?.language ?? '');
+    setNote(f?.note ?? '');
+    setPack(f?.pack ?? 'auto');
+    setTracks(f?.tracks ?? 'mixed');
+    setCopy(false);
+    setAdvanced(!!f && ((f.pack ?? null) !== null || (f.tracks ?? 'mixed') !== 'mixed'));
+  }, [isOpen, f]);
+  // What the file holds, when known (after import): offer only the splits that make sense.
+  const canTracks = !f || (f.audio_tracks ?? 0) > 1 || f.tracks === 'tracks';
+  const canChannels = !f || (f.channels ?? 0) > 1 || f.tracks === 'channels';
+  const lang = language.trim().toLowerCase();
   return (
-    <ModalOverlay isOpen={!!props.paths} onOpenChange={(o) => !o && props.onClose()} isDismissable>
+    <ModalOverlay isOpen={isOpen} onOpenChange={(o) => !o && props.onClose()} isDismissable>
       <Modal>
         <Dialog>
-          <Heading slot="title">Import {many ? `${props.paths?.length} recordings` : 'a recording'}</Heading>
-          <p className="hint">Every field is optional. {many ? 'Each file is labelled with its file name; the rest applies to all of them.' : ''}</p>
+          <Heading slot="title">{f ? `Details of ${f.label}` : `Import ${many ? `${props.paths?.length} recordings` : 'a recording'}`}</Heading>
+          <p className="hint">
+            Every field is optional. {many ? 'Each file is labelled with its file name; the rest applies to all of them.' : ''}
+            {f && f.status === 'transcribed' ? 'Changes to the speakers or the pack apply when it is transcribed again.' : ''}
+          </p>
           {!many && (
             <TextField value={label} onChange={setLabel}>
               <Label>Label</Label>
@@ -549,31 +601,66 @@ function ImportDialog(props: { paths: string[] | null; onClose: () => void; onIm
             <Label>Expected number of speakers</Label>
             <Input placeholder="Found automatically if left empty" />
           </NumberField>
+          <TextField value={language} onChange={setLanguage}>
+            <Label>Language (a two-letter code such as en, fr, ja)</Label>
+            <Input placeholder="Automatic if left empty" maxLength={3} />
+          </TextField>
           <TextField value={note} onChange={setNote}>
             <Label>Note</Label>
             <Input />
           </TextField>
-          <Checkbox isSelected={copy} onChange={setCopy}>
-            <span className="box" aria-hidden="true" /> Copy the recording{many ? 's' : ''} into the project folder (for archiving)
-          </Checkbox>
+          {!f && (
+            <Checkbox isSelected={copy} onChange={setCopy}>
+              <span className="box" aria-hidden="true" /> Copy the recording{many ? 's' : ''} into the project folder (for archiving)
+            </Checkbox>
+          )}
+          <Button className="quiet" onPress={() => setAdvanced((v) => !v)} aria-expanded={advanced}>
+            {advanced ? 'Hide the advanced settings' : 'Advanced settings…'}
+          </Button>
+          {advanced && (
+            <div className="advanced">
+              <RadioGroup value={pack} onChange={setPack}>
+                <Label>Speech model pack</Label>
+                <Radio value="auto">Automatic: the light pack, or the heavy pack for a language the light pack does not cover</Radio>
+                <Radio value="light-1">Light pack (Parakeet, 25 European languages, fast on any computer)</Radio>
+                <Radio value="heavy-1">Heavy pack (Whisper, about 99 languages; best with a graphics card)</Radio>
+              </RadioGroup>
+              <RadioGroup value={tracks} onChange={(v) => setTracks(v as TrackMode)}>
+                <Label>Who is on which microphone</Label>
+                <Radio value="mixed">{TRACK_WORDS.mixed}</Radio>
+                <Radio value="tracks" isDisabled={!canTracks}>
+                  {TRACK_WORDS.tracks}
+                  {f && !canTracks ? ' (this file has one track)' : ''}
+                </Radio>
+                <Radio value="channels" isDisabled={!canChannels}>
+                  {TRACK_WORDS.channels}
+                  {f && !canChannels ? ' (this file has one channel)' : ''}
+                </Radio>
+              </RadioGroup>
+            </div>
+          )}
           <div className="row end">
             <Button onPress={props.onClose}>Cancel</Button>
             <Button
               className="primary"
+              isDisabled={lang !== '' && !/^[a-z]{2,3}$/.test(lang)}
               onPress={() =>
-                props.onImport(
+                props.onSave(
                   {
                     label: label.trim(),
                     date: date.trim() || null,
                     interviewer: interviewer.trim() || null,
                     expected_speakers: Number.isFinite(speakers) ? speakers : null,
+                    language: lang || null,
                     note: note.trim() || null,
+                    pack: pack === 'auto' ? null : pack,
+                    tracks,
                   },
                   copy,
                 )
               }
             >
-              Import
+              {f ? 'Save' : 'Import'}
             </Button>
           </div>
         </Dialog>
@@ -582,7 +669,16 @@ function ImportDialog(props: { paths: string[] | null; onClose: () => void; onIm
   );
 }
 
-function SettingsDialog(props: { isOpen: boolean; settings: Settings; models: ModelStatus | null; onClose: () => void; onSave: (s: Settings) => void }) {
+function SettingsDialog(props: {
+  isOpen: boolean;
+  settings: Settings;
+  models: ModelStatus | null;
+  install: InstallEvent | null;
+  onNotice: (s: string) => void;
+  onModels: (m: ModelStatus) => void;
+  onClose: () => void;
+  onSave: (s: Settings) => void;
+}) {
   const [s, setS] = useState<Settings>(props.settings);
   const [threads, setThreads] = useState('auto');
   useEffect(() => {
@@ -611,6 +707,7 @@ function SettingsDialog(props: { isOpen: boolean; settings: Settings; models: Mo
             <Radio value="16">16</Radio>
           </RadioGroup>
           {props.models && <p className="hint">Speech models: {props.models.dir}</p>}
+          {props.models && <HeavyPack models={props.models} settings={s} install={props.install} onWhisper={(w) => setS({ ...s, whisper: w || null })} onNotice={props.onNotice} onModels={props.onModels} />}
           <section className="about" aria-labelledby="about-heading">
             <h3 id="about-heading">About and credits</h3>
             <p>Prism Transcribe is free software under the Apache License 2.0. It runs these models on this computer:</p>
@@ -618,6 +715,7 @@ function SettingsDialog(props: { isOpen: boolean; settings: Settings; models: Mo
               <li>Parakeet TDT 0.6B v3 by NVIDIA, licensed under CC BY 4.0, converted for sherpa-onnx.</li>
               <li>WeSpeaker ResNet34-LM speaker embedding (WeSpeaker project, trained on VoxCeleb), licensed under CC BY 4.0, converted for sherpa-onnx; Prism Transcribe adds one setting to the file so each recording's average is removed.</li>
               <li>Silero VAD by the Silero Team, MIT licence.</li>
+              <li>With the heavy pack: Whisper large-v3-turbo by OpenAI (MIT licence), run by whisper.cpp (MIT licence) as a separate program.</li>
               <li>sherpa-onnx (Apache License 2.0) and ONNX Runtime (MIT).</li>
             </ul>
           </section>
@@ -630,6 +728,81 @@ function SettingsDialog(props: { isOpen: boolean; settings: Settings; models: Mo
         </Dialog>
       </Modal>
     </ModalOverlay>
+  );
+}
+
+function HeavyPack(props: {
+  models: ModelStatus;
+  settings: Settings;
+  install: InstallEvent | null;
+  onWhisper: (path: string) => void;
+  onNotice: (s: string) => void;
+  onModels: (m: ModelStatus) => void;
+}) {
+  const h = props.models.heavy;
+  const pr = props.install?.progress;
+  const heavyDownloading = pr?.file === 'ggml-large-v3-turbo.bin';
+  return (
+    <section className="heavy" aria-labelledby="heavy-heading">
+      <h3 id="heavy-heading">Heavy pack (optional)</h3>
+      <p className="hint">
+        Whisper large-v3-turbo: about 99 languages, for recordings the light pack cannot do. About {Math.round(h.download_mb / 100) / 10} GB. Best with a
+        graphics card; on the processor alone it can take longer than the recording. It needs the light pack too.
+      </p>
+      <p role="status">{h.installed ? 'Installed and ready.' : h.message || 'Not installed.'}</p>
+      {pr && heavyDownloading ? (
+        <ProgressBar aria-label="Downloading the heavy pack" value={(pr.pack_done / pr.pack_total) * 100}>
+          {({ percentage }) => (
+            <>
+              <span>
+                Downloading {Math.round(pr.pack_done / 1e6)} of {Math.round(pr.pack_total / 1e6)} MB ({Math.round(percentage ?? 0)}%)
+              </span>
+              <div className="bar">
+                <div className="fill" style={{ width: `${percentage}%` }} />
+              </div>
+            </>
+          )}
+        </ProgressBar>
+      ) : (
+        <div className="row">
+          {!h.installed && (
+            <Button isDisabled={props.settings.offline || !!pr} onPress={() => api.modelsInstall('heavy-1').catch((e) => props.onNotice(message(e)))}>
+              Download the heavy pack
+            </Button>
+          )}
+          <Button
+            onPress={async () => {
+              const z = await open({ title: 'Import the heavy pack from an offline zip', filters: [{ name: 'Zip', extensions: ['zip'] }] });
+              if (typeof z !== 'string') return;
+              try {
+                props.onModels(await api.modelsImportZip(z, 'heavy-1'));
+                props.onNotice('The heavy pack is installed and checked.');
+              } catch (e) {
+                props.onNotice(message(e));
+              }
+            }}
+          >
+            Import from an offline zip…
+          </Button>
+        </div>
+      )}
+      <div className="row">
+        <span className="path">{props.settings.whisper || h.program || 'whisper.cpp program not found'}</span>
+        <Button
+          onPress={async () => {
+            const f = await open({ title: 'Find the whisper.cpp program (whisper-cli.exe)', filters: [{ name: 'Program', extensions: ['exe'] }] });
+            if (typeof f === 'string') props.onWhisper(f);
+          }}
+        >
+          Choose the program…
+        </Button>
+        {props.settings.whisper && (
+          <Button className="quiet" onPress={() => props.onWhisper('')}>
+            Look for it automatically
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 

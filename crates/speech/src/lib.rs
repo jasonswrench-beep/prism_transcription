@@ -22,6 +22,7 @@ pub mod models;
 pub mod pipeline;
 pub mod sherpa;
 pub mod wav;
+pub mod whisper;
 
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +82,11 @@ pub trait VoiceDetector {
 /// recording time. `language` is an ISO 639-1 code or `None` for the model's own choice.
 pub trait SpeechRecognizer {
     fn recognize(&self, samples: &[f32], offset: f64, language: Option<&str>) -> Result<Vec<Word>>;
+    /// Several stretches at once, each with its offset. Engines that run as a separate program override this so
+    /// the model loads once for the batch; the default recognizes them one by one.
+    fn recognize_many(&self, pieces: &[(&[f32], f64)], language: Option<&str>) -> Result<Vec<Vec<Word>>> {
+        pieces.iter().map(|(s, o)| self.recognize(s, *o, language)).collect()
+    }
     /// The languages the model can recognize (ISO 639-1), so the app can offer another pack for the rest.
     fn languages(&self) -> &[&'static str];
 }
