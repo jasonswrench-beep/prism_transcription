@@ -25,7 +25,6 @@ Build the app first (README, "Building"); it is `target\release\prism-transcribe
   first look.
 - [ ] **A video file.** Import an MP4 or MKV. This computer has an FFmpeg (a GPL build from winget) on the PATH, which
   the app found. Whether the app ships an LGPL FFmpeg is still open (the FFmpeg item below).
-- [ ] **Push.** Phase 1 is committed locally; it is pushed only when you say so.
 
 ## Phase 0
 
