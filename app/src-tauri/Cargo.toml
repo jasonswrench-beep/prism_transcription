@@ -1,0 +1,23 @@
+[package]
+name = "prism-transcribe-app"
+description = "Prism Transcribe's desktop shell (Tauri)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "prism-transcribe"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+prism-transcribe-core.workspace = true
+prism-transcribe-speech.workspace = true
+serde.workspace = true
+serde_json.workspace = true

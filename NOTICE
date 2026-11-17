@@ -1,0 +1,31 @@
+Prism Transcribe
+Copyright 2026 Jason S. Wrench and the Prism Transcribe contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+Speech models (downloaded separately, never inside the installer; see docs/MODELS.md):
+
+- Parakeet TDT 0.6B v3 by NVIDIA, licensed under CC BY 4.0
+  (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3). Used as converted to ONNX and quantised to int8
+  by the sherpa-onnx project (https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8).
+- WeSpeaker ResNet34-LM speaker embedding (wenet-e2e/wespeaker), trained on VoxCeleb, licensed under CC BY 4.0,
+  as converted to ONNX by sherpa-onnx. Changed by Prism Transcribe: per-utterance mean subtraction added at the
+  model's input (tools/add_mean_subtraction.py).
+- Silero VAD, Copyright (c) 2020-present Silero Team, MIT licence.
+
+Code built into the program:
+
+- sherpa-onnx (Apache License 2.0) and ONNX Runtime (MIT), linked statically. vendor/sherpa-onnx carries one
+  small change, described in vendor/PATCHES.md.

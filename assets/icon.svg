@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">PrismTranscription app icon</title>
+  <desc id="desc">A transparent-background, nine-bar sound waveform ranging from cyan and blue through violet, magenta, coral, orange, and golden yellow.</desc>
+  <defs>
+    <linearGradient id="bar1" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#00F0E9"/><stop offset="1" stop-color="#00CFF7"/></linearGradient>
+    <linearGradient id="bar2" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#04D4FF"/><stop offset="1" stop-color="#078CF9"/></linearGradient>
+    <linearGradient id="bar3" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#447AFF"/><stop offset="1" stop-color="#5260F8"/></linearGradient>
+    <linearGradient id="bar4" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#BE48F8"/><stop offset="1" stop-color="#9B29F5"/></linearGradient>
+    <linearGradient id="bar5" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#EB06E8"/><stop offset="1" stop-color="#DF08E3"/></linearGradient>
+    <linearGradient id="bar6" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#FB5394"/><stop offset="1" stop-color="#F836A7"/></linearGradient>
+    <linearGradient id="bar7" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#FFA357"/><stop offset="1" stop-color="#FF835A"/></linearGradient>
+    <linearGradient id="bar8" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#FFBB43"/><stop offset="1" stop-color="#FFA52A"/></linearGradient>
+    <linearGradient id="bar9" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#FFE43D"/><stop offset="1" stop-color="#FFD122"/></linearGradient>
+  </defs>
+  <!-- Standalone waveform: no square, backdrop, or hidden image layers. -->
+  <rect x="46" y="225" width="32" height="62" rx="16" fill="url(#bar1)"/>
+  <rect x="94" y="199" width="32" height="114" rx="16" fill="url(#bar2)"/>
+  <rect x="142" y="168" width="32" height="176" rx="16" fill="url(#bar3)"/>
+  <rect x="190" y="141" width="32" height="230" rx="16" fill="url(#bar4)"/>
+  <rect x="238" y="94" width="36" height="324" rx="18" fill="url(#bar5)"/>
+  <rect x="290" y="141" width="32" height="230" rx="16" fill="url(#bar6)"/>
+  <rect x="338" y="168" width="32" height="176" rx="16" fill="url(#bar7)"/>
+  <rect x="386" y="199" width="32" height="114" rx="16" fill="url(#bar8)"/>
+  <rect x="434" y="225" width="32" height="62" rx="16" fill="url(#bar9)"/>
+</svg>

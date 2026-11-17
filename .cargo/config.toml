@@ -1,0 +1,7 @@
+# sherpa-onnx's prebuilt static library is built against the static C runtime (/MT). Build everything the same
+# way, so one program never mixes two C runtimes (and needs no Visual C++ redistributable).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

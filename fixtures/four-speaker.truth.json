@@ -1,0 +1,987 @@
+{
+ "title": "Four-person focus group (fixture)",
+ "made_by": "tools/make_fixtures.py (Kokoro-82M voices, Apache-2.0); a computer voice reading a script",
+ "seed": 2,
+ "sample_rate": 16000,
+ "duration": 57.563,
+ "speakers": [
+  {
+   "id": "S1",
+   "voice": "af_heart",
+   "role": "moderator"
+  },
+  {
+   "id": "S2",
+   "voice": "am_onyx",
+   "role": "participant"
+  },
+  {
+   "id": "S3",
+   "voice": "bf_emma",
+   "role": "participant"
+  },
+  {
+   "id": "S4",
+   "voice": "am_echo",
+   "role": "participant"
+  }
+ ],
+ "turns": [
+  {
+   "speaker": "S1",
+   "start": 0.5,
+   "end": 6.732,
+   "overlap": false,
+   "text": "Welcome, everyone. Let's go around once. When you think about the new advising system, what comes to mind first?",
+   "words": [
+    {
+     "text": "Welcome,",
+     "start": 0.5,
+     "end": 0.936
+    },
+    {
+     "text": "everyone.",
+     "start": 1.011,
+     "end": 1.686
+    },
+    {
+     "text": "Let's",
+     "start": 1.799,
+     "end": 2.036
+    },
+    {
+     "text": "go",
+     "start": 2.036,
+     "end": 2.211
+    },
+    {
+     "text": "around",
+     "start": 2.211,
+     "end": 2.536
+    },
+    {
+     "text": "once.",
+     "start": 2.536,
+     "end": 3.236
+    },
+    {
+     "text": "When",
+     "start": 3.336,
+     "end": 3.486
+    },
+    {
+     "text": "you",
+     "start": 3.486,
+     "end": 3.624
+    },
+    {
+     "text": "think",
+     "start": 3.624,
+     "end": 3.824
+    },
+    {
+     "text": "about",
+     "start": 3.824,
+     "end": 4.049
+    },
+    {
+     "text": "the",
+     "start": 4.049,
+     "end": 4.136
+    },
+    {
+     "text": "new",
+     "start": 4.136,
+     "end": 4.311
+    },
+    {
+     "text": "advising",
+     "start": 4.311,
+     "end": 4.886
+    },
+    {
+     "text": "system,",
+     "start": 4.886,
+     "end": 5.411
+    },
+    {
+     "text": "what",
+     "start": 5.486,
+     "end": 5.636
+    },
+    {
+     "text": "comes",
+     "start": 5.636,
+     "end": 5.886
+    },
+    {
+     "text": "to",
+     "start": 5.886,
+     "end": 5.986
+    },
+    {
+     "text": "mind",
+     "start": 5.986,
+     "end": 6.261
+    },
+    {
+     "text": "first?",
+     "start": 6.261,
+     "end": 6.861
+    }
+   ]
+  },
+  {
+   "speaker": "S2",
+   "start": 7.532,
+   "end": 11.039,
+   "overlap": false,
+   "text": "Waiting. I waited almost three weeks for my first appointment last spring.",
+   "words": [
+    {
+     "text": "Waiting.",
+     "start": 7.532,
+     "end": 7.904
+    },
+    {
+     "text": "I",
+     "start": 7.941,
+     "end": 8.078
+    },
+    {
+     "text": "waited",
+     "start": 8.078,
+     "end": 8.354
+    },
+    {
+     "text": "almost",
+     "start": 8.354,
+     "end": 8.754
+    },
+    {
+     "text": "three",
+     "start": 8.754,
+     "end": 8.978
+    },
+    {
+     "text": "weeks",
+     "start": 8.978,
+     "end": 9.278
+    },
+    {
+     "text": "for",
+     "start": 9.278,
+     "end": 9.391
+    },
+    {
+     "text": "my",
+     "start": 9.391,
+     "end": 9.528
+    },
+    {
+     "text": "first",
+     "start": 9.528,
+     "end": 9.791
+    },
+    {
+     "text": "appointment",
+     "start": 9.791,
+     "end": 10.228
+    },
+    {
+     "text": "last",
+     "start": 10.228,
+     "end": 10.504
+    },
+    {
+     "text": "spring.",
+     "start": 10.504,
+     "end": 11.454
+    }
+   ]
+  },
+  {
+   "speaker": "S3",
+   "start": 11.639,
+   "end": 17.135,
+   "overlap": false,
+   "text": "For me it was the opposite, actually. I got in within two days, but the advisor didn't have my records.",
+   "words": [
+    {
+     "text": "For",
+     "start": 11.639,
+     "end": 11.753
+    },
+    {
+     "text": "me",
+     "start": 11.753,
+     "end": 11.978
+    },
+    {
+     "text": "it",
+     "start": 11.978,
+     "end": 12.066
+    },
+    {
+     "text": "was",
+     "start": 12.066,
+     "end": 12.191
+    },
+    {
+     "text": "the",
+     "start": 12.191,
+     "end": 12.328
+    },
+    {
+     "text": "opposite,",
+     "start": 12.328,
+     "end": 12.778
+    },
+    {
+     "text": "actually.",
+     "start": 12.828,
+     "end": 13.753
+    },
+    {
+     "text": "I",
+     "start": 13.853,
+     "end": 13.978
+    },
+    {
+     "text": "got",
+     "start": 13.978,
+     "end": 14.141
+    },
+    {
+     "text": "in",
+     "start": 14.141,
+     "end": 14.291
+    },
+    {
+     "text": "within",
+     "start": 14.291,
+     "end": 14.553
+    },
+    {
+     "text": "two",
+     "start": 14.553,
+     "end": 14.753
+    },
+    {
+     "text": "days,",
+     "start": 14.753,
+     "end": 15.103
+    },
+    {
+     "text": "but",
+     "start": 15.141,
+     "end": 15.266
+    },
+    {
+     "text": "the",
+     "start": 15.266,
+     "end": 15.378
+    },
+    {
+     "text": "advisor",
+     "start": 15.378,
+     "end": 15.878
+    },
+    {
+     "text": "didn't",
+     "start": 15.878,
+     "end": 16.103
+    },
+    {
+     "text": "have",
+     "start": 16.103,
+     "end": 16.266
+    },
+    {
+     "text": "my",
+     "start": 16.266,
+     "end": 16.428
+    },
+    {
+     "text": "records.",
+     "start": 16.428,
+     "end": 17.503
+    }
+   ]
+  },
+  {
+   "speaker": "S4",
+   "start": 17.635,
+   "end": 21.11,
+   "overlap": false,
+   "text": "Same here. I had to explain my whole transfer history again.",
+   "words": [
+    {
+     "text": "Same",
+     "start": 17.674,
+     "end": 17.999
+    },
+    {
+     "text": "here.",
+     "start": 17.999,
+     "end": 18.299
+    },
+    {
+     "text": "I",
+     "start": 18.374,
+     "end": 18.499
+    },
+    {
+     "text": "had",
+     "start": 18.499,
+     "end": 18.674
+    },
+    {
+     "text": "to",
+     "start": 18.674,
+     "end": 18.774
+    },
+    {
+     "text": "explain",
+     "start": 18.774,
+     "end": 19.274
+    },
+    {
+     "text": "my",
+     "start": 19.274,
+     "end": 19.486
+    },
+    {
+     "text": "whole",
+     "start": 19.486,
+     "end": 19.761
+    },
+    {
+     "text": "transfer",
+     "start": 19.761,
+     "end": 20.274
+    },
+    {
+     "text": "history",
+     "start": 20.274,
+     "end": 20.699
+    },
+    {
+     "text": "again.",
+     "start": 20.699,
+     "end": 21.474
+    }
+   ]
+  },
+  {
+   "speaker": "S1",
+   "start": 21.81,
+   "end": 26.294,
+   "overlap": false,
+   "text": "So timing for some of you, and records for others. Can you say more about the records?",
+   "words": [
+    {
+     "text": "So",
+     "start": 21.822,
+     "end": 22.009
+    },
+    {
+     "text": "timing",
+     "start": 22.009,
+     "end": 22.447
+    },
+    {
+     "text": "for",
+     "start": 22.447,
+     "end": 22.572
+    },
+    {
+     "text": "some",
+     "start": 22.572,
+     "end": 22.709
+    },
+    {
+     "text": "of",
+     "start": 22.709,
+     "end": 22.797
+    },
+    {
+     "text": "you,",
+     "start": 22.797,
+     "end": 23.072
+    },
+    {
+     "text": "and",
+     "start": 23.172,
+     "end": 23.297
+    },
+    {
+     "text": "records",
+     "start": 23.297,
+     "end": 23.722
+    },
+    {
+     "text": "for",
+     "start": 23.722,
+     "end": 23.847
+    },
+    {
+     "text": "others.",
+     "start": 23.847,
+     "end": 24.522
+    },
+    {
+     "text": "Can",
+     "start": 24.647,
+     "end": 24.797
+    },
+    {
+     "text": "you",
+     "start": 24.797,
+     "end": 24.934
+    },
+    {
+     "text": "say",
+     "start": 24.934,
+     "end": 25.172
+    },
+    {
+     "text": "more",
+     "start": 25.172,
+     "end": 25.384
+    },
+    {
+     "text": "about",
+     "start": 25.384,
+     "end": 25.584
+    },
+    {
+     "text": "the",
+     "start": 25.584,
+     "end": 25.672
+    },
+    {
+     "text": "records?",
+     "start": 25.672,
+     "end": 26.447
+    }
+   ]
+  },
+  {
+   "speaker": "S3",
+   "start": 26.894,
+   "end": 32.03,
+   "overlap": false,
+   "text": "Well, I transferred from Lakeview Community College, and none of those credits showed up in the portal.",
+   "words": [
+    {
+     "text": "Well,",
+     "start": 26.894,
+     "end": 27.116
+    },
+    {
+     "text": "I",
+     "start": 27.154,
+     "end": 27.291
+    },
+    {
+     "text": "transferred",
+     "start": 27.291,
+     "end": 27.966
+    },
+    {
+     "text": "from",
+     "start": 27.966,
+     "end": 28.141
+    },
+    {
+     "text": "Lakeview",
+     "start": 28.141,
+     "end": 28.491
+    },
+    {
+     "text": "Community",
+     "start": 28.491,
+     "end": 29.016
+    },
+    {
+     "text": "College,",
+     "start": 29.016,
+     "end": 29.741
+    },
+    {
+     "text": "and",
+     "start": 29.841,
+     "end": 29.966
+    },
+    {
+     "text": "none",
+     "start": 29.966,
+     "end": 30.129
+    },
+    {
+     "text": "of",
+     "start": 30.129,
+     "end": 30.216
+    },
+    {
+     "text": "those",
+     "start": 30.216,
+     "end": 30.466
+    },
+    {
+     "text": "credits",
+     "start": 30.466,
+     "end": 30.929
+    },
+    {
+     "text": "showed",
+     "start": 30.929,
+     "end": 31.179
+    },
+    {
+     "text": "up",
+     "start": 31.179,
+     "end": 31.329
+    },
+    {
+     "text": "in",
+     "start": 31.329,
+     "end": 31.404
+    },
+    {
+     "text": "the",
+     "start": 31.404,
+     "end": 31.491
+    },
+    {
+     "text": "portal.",
+     "start": 31.491,
+     "end": 32.441
+    }
+   ]
+  },
+  {
+   "speaker": "S2",
+   "start": 31.73,
+   "end": 32.288,
+   "overlap": true,
+   "text": "Right.",
+   "words": [
+    {
+     "text": "Right.",
+     "start": 31.763,
+     "end": 32.138
+    }
+   ]
+  },
+  {
+   "speaker": "S3",
+   "start": 32.688,
+   "end": 36.455,
+   "overlap": false,
+   "text": "So the advisor kept telling me I needed courses I had already taken.",
+   "words": [
+    {
+     "text": "So",
+     "start": 32.708,
+     "end": 32.87
+    },
+    {
+     "text": "the",
+     "start": 32.87,
+     "end": 33.008
+    },
+    {
+     "text": "advisor",
+     "start": 33.008,
+     "end": 33.508
+    },
+    {
+     "text": "kept",
+     "start": 33.508,
+     "end": 33.783
+    },
+    {
+     "text": "telling",
+     "start": 33.783,
+     "end": 34.095
+    },
+    {
+     "text": "me",
+     "start": 34.095,
+     "end": 34.258
+    },
+    {
+     "text": "I",
+     "start": 34.258,
+     "end": 34.408
+    },
+    {
+     "text": "needed",
+     "start": 34.408,
+     "end": 34.758
+    },
+    {
+     "text": "courses",
+     "start": 34.758,
+     "end": 35.358
+    },
+    {
+     "text": "I",
+     "start": 35.358,
+     "end": 35.47
+    },
+    {
+     "text": "had",
+     "start": 35.47,
+     "end": 35.583
+    },
+    {
+     "text": "already",
+     "start": 35.583,
+     "end": 35.933
+    },
+    {
+     "text": "taken.",
+     "start": 35.933,
+     "end": 36.908
+    }
+   ]
+  },
+  {
+   "speaker": "S4",
+   "start": 37.055,
+   "end": 42.466,
+   "overlap": false,
+   "text": "I think the portal only reads the last school you attended. That happened to my roommate, Kevin, too.",
+   "words": [
+    {
+     "text": "I",
+     "start": 37.055,
+     "end": 37.142
+    },
+    {
+     "text": "think",
+     "start": 37.142,
+     "end": 37.342
+    },
+    {
+     "text": "the",
+     "start": 37.342,
+     "end": 37.442
+    },
+    {
+     "text": "portal",
+     "start": 37.442,
+     "end": 37.842
+    },
+    {
+     "text": "only",
+     "start": 37.842,
+     "end": 38.142
+    },
+    {
+     "text": "reads",
+     "start": 38.142,
+     "end": 38.467
+    },
+    {
+     "text": "the",
+     "start": 38.467,
+     "end": 38.592
+    },
+    {
+     "text": "last",
+     "start": 38.592,
+     "end": 38.892
+    },
+    {
+     "text": "school",
+     "start": 38.892,
+     "end": 39.217
+    },
+    {
+     "text": "you",
+     "start": 39.217,
+     "end": 39.367
+    },
+    {
+     "text": "attended.",
+     "start": 39.367,
+     "end": 40.067
+    },
+    {
+     "text": "That",
+     "start": 40.18,
+     "end": 40.417
+    },
+    {
+     "text": "happened",
+     "start": 40.417,
+     "end": 40.767
+    },
+    {
+     "text": "to",
+     "start": 40.767,
+     "end": 40.855
+    },
+    {
+     "text": "my",
+     "start": 40.855,
+     "end": 41.042
+    },
+    {
+     "text": "roommate,",
+     "start": 41.042,
+     "end": 41.567
+    },
+    {
+     "text": "Kevin,",
+     "start": 41.642,
+     "end": 41.992
+    },
+    {
+     "text": "too.",
+     "start": 42.08,
+     "end": 42.817
+    }
+   ]
+  },
+  {
+   "speaker": "S1",
+   "start": 43.266,
+   "end": 45.144,
+   "overlap": false,
+   "text": "What would have made that first meeting better?",
+   "words": [
+    {
+     "text": "What",
+     "start": 43.266,
+     "end": 43.4
+    },
+    {
+     "text": "would",
+     "start": 43.4,
+     "end": 43.5
+    },
+    {
+     "text": "have",
+     "start": 43.5,
+     "end": 43.6
+    },
+    {
+     "text": "made",
+     "start": 43.6,
+     "end": 43.813
+    },
+    {
+     "text": "that",
+     "start": 43.813,
+     "end": 44.075
+    },
+    {
+     "text": "first",
+     "start": 44.075,
+     "end": 44.413
+    },
+    {
+     "text": "meeting",
+     "start": 44.413,
+     "end": 44.713
+    },
+    {
+     "text": "better?",
+     "start": 44.713,
+     "end": 45.313
+    }
+   ]
+  },
+  {
+   "speaker": "S2",
+   "start": 45.644,
+   "end": 48.874,
+   "overlap": false,
+   "text": "Honestly, a checklist before the meeting. Tell me what to bring.",
+   "words": [
+    {
+     "text": "Honestly,",
+     "start": 45.644,
+     "end": 46.134
+    },
+    {
+     "text": "a",
+     "start": 46.172,
+     "end": 46.272
+    },
+    {
+     "text": "checklist",
+     "start": 46.272,
+     "end": 46.809
+    },
+    {
+     "text": "before",
+     "start": 46.809,
+     "end": 47.172
+    },
+    {
+     "text": "the",
+     "start": 47.172,
+     "end": 47.259
+    },
+    {
+     "text": "meeting.",
+     "start": 47.259,
+     "end": 47.759
+    },
+    {
+     "text": "Tell",
+     "start": 47.859,
+     "end": 48.047
+    },
+    {
+     "text": "me",
+     "start": 48.047,
+     "end": 48.159
+    },
+    {
+     "text": "what",
+     "start": 48.159,
+     "end": 48.297
+    },
+    {
+     "text": "to",
+     "start": 48.297,
+     "end": 48.409
+    },
+    {
+     "text": "bring.",
+     "start": 48.409,
+     "end": 49.284
+    }
+   ]
+  },
+  {
+   "speaker": "S4",
+   "start": 48.624,
+   "end": 49.909,
+   "overlap": true,
+   "text": "Yes, exactly.",
+   "words": [
+    {
+     "text": "Yes,",
+     "start": 48.638,
+     "end": 48.988
+    },
+    {
+     "text": "exactly.",
+     "start": 49.063,
+     "end": 50.038
+    }
+   ]
+  },
+  {
+   "speaker": "S3",
+   "start": 50.509,
+   "end": 54.602,
+   "overlap": false,
+   "text": "And let us upload transcripts ourselves, instead of waiting for the registrar.",
+   "words": [
+    {
+     "text": "And",
+     "start": 50.509,
+     "end": 50.622
+    },
+    {
+     "text": "let",
+     "start": 50.622,
+     "end": 50.81
+    },
+    {
+     "text": "us",
+     "start": 50.81,
+     "end": 50.972
+    },
+    {
+     "text": "upload",
+     "start": 50.972,
+     "end": 51.422
+    },
+    {
+     "text": "transcripts",
+     "start": 51.422,
+     "end": 51.997
+    },
+    {
+     "text": "ourselves,",
+     "start": 51.997,
+     "end": 52.722
+    },
+    {
+     "text": "instead",
+     "start": 52.822,
+     "end": 53.185
+    },
+    {
+     "text": "of",
+     "start": 53.185,
+     "end": 53.272
+    },
+    {
+     "text": "waiting",
+     "start": 53.272,
+     "end": 53.672
+    },
+    {
+     "text": "for",
+     "start": 53.672,
+     "end": 53.785
+    },
+    {
+     "text": "the",
+     "start": 53.785,
+     "end": 53.872
+    },
+    {
+     "text": "registrar.",
+     "start": 53.872,
+     "end": 54.972
+    }
+   ]
+  },
+  {
+   "speaker": "S1",
+   "start": 55.202,
+   "end": 56.763,
+   "overlap": false,
+   "text": "That's helpful. Thank you all.",
+   "words": [
+    {
+     "text": "That's",
+     "start": 55.209,
+     "end": 55.484
+    },
+    {
+     "text": "helpful.",
+     "start": 55.484,
+     "end": 55.984
+    },
+    {
+     "text": "Thank",
+     "start": 56.097,
+     "end": 56.334
+    },
+    {
+     "text": "you",
+     "start": 56.334,
+     "end": 56.434
+    },
+    {
+     "text": "all.",
+     "start": 56.434,
+     "end": 56.909
+    }
+   ]
+  }
+ ]
+}

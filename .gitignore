@@ -1,0 +1,22 @@
+/target
+*.log
+__pycache__/
+
+# Speech models are large and are never committed: they live in the shared model folder (docs/MODELS.md).
+*.onnx
+*.bin
+*.tar.bz2
+
+# The desktop app's generated files
+/app/src-tauri/gen/
+
+# Benchmark output written beside the repository by mistake
+/bench-results/
+
+# Local AI-assistant files and credentials: never commit these
+/.claude/
+CLAUDE.local.md
+.env
+.env.*
+*.pem
+*.key

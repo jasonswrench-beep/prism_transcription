@@ -1,0 +1,16 @@
+[package]
+name = "prism-transcribe-speech"
+description = "The C5 speech engine adapter: detect voice, recognize speech, label speakers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+sherpa-onnx.workspace = true
+hound = "3.5"

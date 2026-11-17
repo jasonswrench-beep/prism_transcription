@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/speech",
+    "crates/bench",
+    "app/src-tauri",
+]
+# The desktop shell takes longest to build; `cargo build` at the top builds the libraries and bench only.
+default-members = ["crates/core", "crates/speech", "crates/bench"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.92"
+license = "Apache-2.0"
+authors = ["Prism Transcribe contributors"]
+repository = "https://github.com/jasonswrench-beep/prism_transcription"
+
+[workspace.dependencies]
+prism-transcribe-core = { path = "crates/core" }
+prism-transcribe-speech = { path = "crates/speech" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+sha2 = "0.10"
+# Static link: one program file, no DLLs beside it. The build downloads the matching prebuilt library from
+# sherpa-onnx's GitHub release unless SHERPA_ONNX_ARCHIVE_DIR points at a local copy (see docs/MODELS.md).
+sherpa-onnx = { version = "=2.0.1", default-features = false, features = ["static"] }
+
+# sherpa-onnx's Rust wrapper drops the per-token log-probabilities the C API returns; see vendor/PATCHES.md.
+[patch.crates-io]
+sherpa-onnx = { path = "vendor/sherpa-onnx" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Dependencies are optimised even in debug builds, so tests that run the models stay fast.
+[profile.dev.package."*"]
+opt-level = 3
