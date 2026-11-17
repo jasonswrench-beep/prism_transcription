@@ -157,6 +157,10 @@ impl PauseLabeller {
 impl SpeakerLabeler for PauseLabeller {
     fn label(&self, samples: &[f32], expected_speakers: Option<u32>) -> Result<Vec<SpeakerSpan>> {
         let spans = self.vad.detect(samples)?;
+        self.label_speech(samples, &spans, expected_speakers)
+    }
+
+    fn label_speech(&self, samples: &[f32], spans: &[SpeechSpan], expected_speakers: Option<u32>) -> Result<Vec<SpeakerSpan>> {
         let sr = SAMPLE_RATE as f64;
         // Windows: (span index, start, end).
         let mut windows: Vec<(usize, f64, f64)> = Vec::new();

@@ -26,9 +26,10 @@ pub struct ModelPack {
 pub const PARAKEET_DIR: &str = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8";
 /// Only for [`crate::sherpa::PyannoteLabeller`], the comparison labeller; not part of the light pack.
 pub const SEGMENTATION_DIR: &str = "sherpa-onnx-pyannote-segmentation-3-0";
-/// WeSpeaker ResNet34-LM (VoxCeleb, CC BY 4.0) with per-utterance mean subtraction added at its input by
-/// tools/add_mean_subtraction.py, because sherpa-onnx does not apply it to "wespeaker" models (docs/MODELS.md).
-pub const EMBEDDING_FILE: &str = "wespeaker_en_voxceleb_resnet34_LM.cmn.onnx";
+/// WeSpeaker ResNet34-LM (VoxCeleb, CC BY 4.0) with one metadata entry appended, `feature_normalize_type` =
+/// `global-mean`, so sherpa-onnx removes each utterance's feature mean as WeSpeaker models need (docs/MODELS.md).
+/// The installer downloads the published file and appends the entry ([`crate::install`]).
+pub const EMBEDDING_FILE: &str = "wespeaker_en_voxceleb_resnet34_LM.global-mean.onnx";
 
 /// The light default pack: CPU only, every machine.
 pub const LIGHT_PACK: ModelPack = ModelPack {
@@ -40,7 +41,7 @@ pub const LIGHT_PACK: ModelPack = ModelPack {
         ModelFile { path: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/decoder.int8.onnx", bytes: 11_845_274, sha256: "0222a86147299d4dee90edf95b6d13827edb42ad8b7c9cf0b2582f030937c0b5" },
         ModelFile { path: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/joiner.int8.onnx", bytes: 6_355_277, sha256: "cbd02f3696e9944970111fb439d9c3fd365a80374565f13f2b9c7007d253fc98" },
         ModelFile { path: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/tokens.txt", bytes: 93_939, sha256: "d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d" },
-        ModelFile { path: "wespeaker_en_voxceleb_resnet34_LM.cmn.onnx", bytes: 26_530_764, sha256: "d467fd5b50a917ed4c986fabddd3913e4dfddfc3eaf21af96adbddf77bcf8e52" },
+        ModelFile { path: "wespeaker_en_voxceleb_resnet34_LM.global-mean.onnx", bytes: 26_530_589, sha256: "ce2c5db3fb2c438f1d58de35577c951bc27ea0d41ef74968de4a480a1a59e39b" },
     ],
 };
 

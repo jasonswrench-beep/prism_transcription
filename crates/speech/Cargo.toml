@@ -14,3 +14,10 @@ thiserror.workspace = true
 sha2.workspace = true
 sherpa-onnx.workspace = true
 hound = "3.5"
+ureq = "3"
+tar = "0.4"
+bzip2 = "0.6"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

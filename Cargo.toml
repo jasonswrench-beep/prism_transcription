@@ -2,12 +2,14 @@
 resolver = "2"
 members = [
     "crates/core",
+    "crates/media",
+    "crates/engine",
     "crates/speech",
     "crates/bench",
     "app/src-tauri",
 ]
 # The desktop shell takes longest to build; `cargo build` at the top builds the libraries and bench only.
-default-members = ["crates/core", "crates/speech", "crates/bench"]
+default-members = ["crates/core", "crates/media", "crates/engine", "crates/speech", "crates/bench"]
 
 [workspace.package]
 version = "0.0.1"
@@ -20,8 +22,10 @@ repository = "https://github.com/jasonswrench-beep/prism_transcription"
 [workspace.dependencies]
 prism-transcribe-core = { path = "crates/core" }
 prism-transcribe-speech = { path = "crates/speech" }
+prism-transcribe-media = { path = "crates/media" }
+prism-transcribe-engine = { path = "crates/engine" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 sha2 = "0.10"
 # Static link: one program file, no DLLs beside it. The build downloads the matching prebuilt library from

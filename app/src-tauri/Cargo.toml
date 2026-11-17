@@ -17,7 +17,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
 prism-transcribe-core.workspace = true
 prism-transcribe-speech.workspace = true
+prism-transcribe-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -11,8 +11,10 @@ with a note of any change).
 
 ## Light pack (CPU, every machine): `light-1`
 
-About 0.70 GB unpacked (0.52 GB to download). The files the program checks are listed in
-`crates/speech/src/models.rs`; `bench --verify` checks every size and SHA-256.
+About 0.70 GB unpacked (0.51 GB to download). The files the program checks are listed in
+`crates/speech/src/models.rs`, and where each comes from in `crates/speech/src/install.rs`; `bench --verify` and
+`prism-transcribe-cli models status` check every size and SHA-256. Tried from an empty folder on 2026-11-17: the
+whole pack downloaded, unpacked and checked in 45 s; an offline zip of it (698 MB) imported and checked.
 
 | Job | Model | Original source and licence | File downloaded |
 |---|---|---|---|
@@ -23,13 +25,15 @@ About 0.70 GB unpacked (0.52 GB to download). The files the program checks are l
 | Runtime | sherpa-onnx 2.0.1 on ONNX Runtime | github.com/k2-fsa/sherpa-onnx, **Apache 2.0** ([text](licences/sherpa-onnx-Apache-2.0.txt)); ONNX Runtime **MIT** | Linked into the program (see below), not a model download |
 
 **The change to the embedding model.** WeSpeaker models expect each utterance's mean removed from their input
-features. sherpa-onnx 2.0.1 does not do that for "wespeaker" models, and the published file then hardly tells voices
-apart through sherpa-onnx (60-minute focus group: 81 % of words to the right speaker, and 1 speaker found of 8 with no
-count given). `tools/add_mean_subtraction.py` adds the subtraction (two nodes) at the model's input and notes it in the
-model's metadata; with it, embeddings equal community-1's to within 0.0002 and the same test gives 99 % and 8 of 8.
-CC BY 4.0 allows sharing the changed file with credit and a statement that it was changed. **Open for phase 1:** host
-the changed file (for example as a release asset of this repository) or have the model manager download the original
-and apply the change on the computer. Until then the bench expects the changed file in the model folder.
+features. sherpa-onnx 2.0.1 does not do that for "wespeaker" models unless the model's metadata says so, and the
+published file then hardly tells voices apart (60-minute focus group: 81 % of words to the right speaker, and 1
+speaker found of 8 with no count given). The installer downloads the published file, checks its SHA-256, and appends
+one metadata entry, `feature_normalize_type` = `global-mean` (39 bytes: protobuf merges a field that appears again at
+the end of a message, so nothing is parsed or rewritten; `install::onnx_metadata_entry`). sherpa-onnx then removes the
+mean itself, and the fixtures give the same result as phase 0's graph-edited model (four-speaker clip: 4 of 4 found,
+98.8 %). The result is checked against its own SHA-256 below. Because the change happens on the user's computer,
+nothing changed has to be hosted; CC BY 4.0 allows the change in any case, with the note in NOTICE.
+(`tools/add_mean_subtraction.py`, the graph edit phase 0 used, stays for reference.)
 
 **Replaced in phase 0** (downloaded and measured, not in the pack): 3D-Speaker CAM++ English
 (`3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx`, Apache 2.0, [text](licences/3D-Speaker-Apache-2.0.txt)), which
@@ -61,7 +65,7 @@ All files come from `https://github.com/k2-fsa/sherpa-onnx/releases/download/<ta
 | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/decoder.int8.onnx` | 11,845,274 | `0222a86147299d4dee90edf95b6d13827edb42ad8b7c9cf0b2582f030937c0b5` |
 | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/joiner.int8.onnx` | 6,355,277 | `cbd02f3696e9944970111fb439d9c3fd365a80374565f13f2b9c7007d253fc98` |
 | `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/tokens.txt` | 93,939 | `d58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d` |
-| `wespeaker_en_voxceleb_resnet34_LM.cmn.onnx` (changed, above) | 26,530,764 | `d467fd5b50a917ed4c986fabddd3913e4dfddfc3eaf21af96adbddf77bcf8e52` |
+| `wespeaker_en_voxceleb_resnet34_LM.global-mean.onnx` (the download plus the 39-byte entry, above) | 26,530,589 | `ce2c5db3fb2c438f1d58de35577c951bc27ea0d41ef74968de4a480a1a59e39b` |
 
 The Parakeet archive also holds a README and four short test recordings; the program does not use them.
 

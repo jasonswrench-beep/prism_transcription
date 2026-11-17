@@ -21,8 +21,8 @@ Speech models (downloaded separately, never inside the installer; see docs/MODEL
   (https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3). Used as converted to ONNX and quantised to int8
   by the sherpa-onnx project (https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8).
 - WeSpeaker ResNet34-LM speaker embedding (wenet-e2e/wespeaker), trained on VoxCeleb, licensed under CC BY 4.0,
-  as converted to ONNX by sherpa-onnx. Changed by Prism Transcribe: per-utterance mean subtraction added at the
-  model's input (tools/add_mean_subtraction.py).
+  as converted to ONNX by sherpa-onnx. Changed on the user's computer by Prism Transcribe's installer: one
+  metadata entry appended (feature_normalize_type = global-mean) so the runtime removes each utterance's mean.
 - Silero VAD, Copyright (c) 2020-present Silero Team, MIT licence.
 
 Code built into the program:

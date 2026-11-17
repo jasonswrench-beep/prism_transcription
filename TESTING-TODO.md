@@ -3,6 +3,30 @@
 Things the build sessions could not check themselves. Newest phase first. When one is done, delete it and note the
 result in the matching results file.
 
+## Phase 1
+
+Build the app first (README, "Building"); it is `target\release\prism-transcribe.exe`.
+
+- [ ] **The phase's own test: a 60-minute interview to Word with the network unplugged.** Unplug the cable or turn
+  off Wi-Fi, start the app, New project, Import a real 60-minute interview (Expected speakers: 2), Transcribe, then
+  Export to Word. The build session did this with the command line (`prism-transcribe-cli run`, 8.4 minutes, Word
+  opened the result) but with the network connected; the transcription code has no network code in it, which is
+  what this checks for real.
+- [ ] **The window by hand.** The session drove the window through its debugging port (project, import, Transcribe
+  button, progress, transcript, export), so the native parts were not tried: the folder and file pickers, the Save
+  dialogs, Cancel during a transcription and then Transcribe again (it should carry on, not start over), and closing
+  the app mid-transcription then transcribing again (the same).
+- [ ] **Model download in the window.** On a computer without the models (or after renaming
+  `%LOCALAPPDATA%\OpenStage\shared-models\speech`): the Speech models panel, Download (about 514 MB), the progress bar,
+  and Import from an offline zip (`prism-transcribe-cli models export-zip light-pack.zip` makes one). With Settings,
+  Offline on, Download should be greyed and the status bar should show the padlock.
+- [ ] **Keyboard and screen reader.** Tab through the window and every dialog, and listen with NVDA: buttons, the
+  progress bar's text, the transcript as plain text. Phase 2 makes the editor fully keyboard-driven; this is the
+  first look.
+- [ ] **A video file.** Import an MP4 or MKV. This computer has an FFmpeg (a GPL build from winget) on the PATH, which
+  the app found. Whether the app ships an LGPL FFmpeg is still open (the FFmpeg item below).
+- [ ] **Push.** Phase 1 is committed locally; it is pushed only when you say so.
+
 ## Phase 0
 
 - [ ] **Run bench.exe on a laptop with no graphics card** (the spec's 4-core laptop target: a 60-minute file in

@@ -16,6 +16,8 @@
 //! start of the recording, as `f64`. Nothing in this crate touches the network.
 
 pub mod cluster;
+pub mod install;
+pub mod job;
 pub mod models;
 pub mod pipeline;
 pub mod sherpa;
@@ -87,4 +89,10 @@ pub trait SpeechRecognizer {
 /// `None` lets the engine decide by its threshold.
 pub trait SpeakerLabeler {
     fn label(&self, samples: &[f32], expected_speakers: Option<u32>) -> Result<Vec<SpeakerSpan>>;
+    /// The same, reusing speech already detected by job 1, for labellers that cut at pauses. The default ignores
+    /// the spans.
+    fn label_speech(&self, samples: &[f32], speech: &[SpeechSpan], expected_speakers: Option<u32>) -> Result<Vec<SpeakerSpan>> {
+        let _ = speech;
+        self.label(samples, expected_speakers)
+    }
 }

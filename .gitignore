@@ -20,3 +20,7 @@ CLAUDE.local.md
 .env.*
 *.pem
 *.key
+
+# The interface's packages and build
+/app/ui/node_modules/
+/app/ui/dist/

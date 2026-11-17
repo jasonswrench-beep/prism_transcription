@@ -1,0 +1,18 @@
+[package]
+name = "prism-transcribe-media"
+description = "Decode recordings and make the 16 kHz mono copy the speech engine reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "mp3", "aac", "isomp4", "flac", "vorbis", "ogg", "adpcm"] }
+rubato = "5"
+hound = "3.5"
+
+[dev-dependencies]
+tempfile = "3"

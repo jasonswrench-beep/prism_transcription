@@ -1,7 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window may call the app's own commands and nothing else.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "What the Prism Transcribe window may do: call the app's own commands, hear its progress events, and show open and save dialogs.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask"
+  ]
 }
