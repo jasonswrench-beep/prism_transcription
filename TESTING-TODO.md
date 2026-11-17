@@ -3,6 +3,31 @@
 Things the build sessions could not check themselves. Newest phase first. When one is done, delete it and note the
 result in the matching results file.
 
+## Phase 2
+
+- [ ] **The phase's own test: correct a whole transcript with the keyboard only.** Open a transcribed recording (Edit),
+  and without the mouse:
+  - Play and pause with F4, skip with F3 and F5, and change speed with F6 and F7.
+  - Move between turns with Ctrl+Up and Ctrl+Down, and type corrections.
+  - Insert notation with Ctrl+K and timestamps with Ctrl+T.
+  - Mark progress with Ctrl+M, save a snapshot with Ctrl+Shift+S, find with Ctrl+F, and save with Ctrl+S.
+
+  The build session drove these keys through the debugging port on the four-person fixture. Playback, speed,
+  rewind on resume, typing, notation, the checked marker, snapshot, find, save, undo and redo all worked, and the saved
+  file kept word times in order. A person doing a real correction pass is the real test.
+- [ ] **A foot pedal.** If you have a USB transcription pedal that types keys, set it up in Keys (press Change, then the
+  pedal). Pedals that present as a game controller are a later phase.
+- [ ] **Volume boost.** Choose 2× while a quiet recording plays: it should get louder. (Not checked by ear; the
+  browser plays the recording through Web Audio once the boost is on.)
+- [ ] **Screen reader in the editor (NVDA).** Each turn is announced as the speaker and time, and its text reads as
+  plain text. Check that the playing-word highlight is not read out, and that the dialogs (Notation, Snapshots, Keys,
+  Find) read sensibly.
+- [ ] **Video in the editor.** An MP4 shows its picture above the waveform. A file the browser cannot play (WMA, AVI,
+  MKV) plays from a sound-only copy, with a note saying so.
+- [ ] **Spell check.** Words are underlined by Windows' own spell checker. The spec's *project word list* (so participants'
+  pseudonyms stop being flagged) is **not built yet**: the browser's spell checker does not take a custom list. It
+  needs a spell checker of our own, and is carried to the next phase.
+
 ## Phase 1
 
 Build the app first (README, "Building"); it is `target\release\prism-transcribe.exe`.

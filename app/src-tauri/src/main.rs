@@ -5,8 +5,11 @@
 // waits on it. Nothing here touches the network except the model install, which the Offline switch blocks.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod media_protocol;
+
+use prism_transcribe_core::edit::{self, FindOptions};
 use prism_transcribe_core::export::ExportOptions;
-use prism_transcribe_core::model::Transcript;
+use prism_transcribe_core::model::{Transcript, Turn};
 use prism_transcribe_core::project::{ImportFields, MediaCheck, MediaFile, Project};
 use prism_transcribe_engine::{self as engine, ExportFormat, Progress, Settings};
 use prism_transcribe_speech::{install, models};
@@ -260,10 +263,123 @@ fn settings_set(settings: Settings) -> Res<Settings> {
     Ok(Settings::load())
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// The editor (phase 2)
+// ---------------------------------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct EditorInfo {
+    /// What the audio or video element plays: the original, or a WAV copy when WebView2 cannot play the original.
+    url: String,
+    playback_copy: bool,
+    has_video: bool,
+    duration: f64,
+    peaks_per_second: u32,
+    notation: Vec<String>,
+    hotkeys: std::collections::BTreeMap<String, String>,
+    rewind_on_resume: f64,
+}
+
+#[tauri::command]
+fn editor_info(state: State<AppState>, id: String) -> Res<EditorInfo> {
+    let dir = current(&state)?;
+    let settings = Settings::load();
+    let (path, copy) = engine::playback_file(&dir, &id, &settings).map_err(err)?;
+    let p = Project::open(&dir).map_err(err)?;
+    let m = p.media(&id).map_err(err)?;
+    // A version number in the address, so a different project's F001 is never served from the player's cache.
+    let stamp = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+    Ok(EditorInfo {
+        url: format!("http://media.localhost/{id}?v={stamp}"),
+        playback_copy: copy,
+        has_video: m.has_video && !copy,
+        duration: m.duration,
+        peaks_per_second: engine::peaks_per_second(),
+        notation: p.file.notation.clone(),
+        hotkeys: settings.effective_hotkeys(),
+        rewind_on_resume: settings.rewind(),
+    })
+}
+
+#[tauri::command]
+async fn peaks(state: State<'_, AppState>, id: String) -> Res<Vec<i8>> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || engine::peaks(&dir, &id, &Settings::load()).map_err(err)).await.map_err(err)?
+}
+
+/// A turn whose text was edited: new words, with times kept by T5's rule. `lo` and `hi` bound typed words at the
+/// turn's edges (the previous turn's end and the next turn's start).
+#[tauri::command]
+fn retime_turn(turn: Turn, text: String, lo: f64, hi: f64) -> Turn {
+    let words = edit::retime(&turn.words, &text, &turn.speaker, lo, hi);
+    let (start, end) = match (words.first(), words.last()) {
+        (Some(f), Some(l)) => (f.start, l.end),
+        _ => (turn.start, turn.start),
+    };
+    Turn { words, start, end, ..turn }
+}
+
+/// For each turn, which words the clean view shows.
+#[tauri::command]
+fn clean_masks(turns: Vec<Turn>) -> Vec<Vec<bool>> {
+    turns.iter().map(|t| edit::clean_mask(&t.words)).collect()
+}
+
+#[tauri::command]
+fn transcript_save(state: State<AppState>, transcript: Transcript) -> Res<()> {
+    engine::save_transcript(&current(&state)?, transcript).map_err(err)
+}
+
+#[tauri::command]
+fn replace_in_project(state: State<AppState>, find: String, replace: String, options: FindOptions) -> Res<Vec<(String, usize)>> {
+    engine::replace_in_project(&current(&state)?, &find, &replace, &options).map_err(err)
+}
+
+#[tauri::command]
+fn notation_set(state: State<AppState>, list: Vec<String>) -> Res<Vec<String>> {
+    let list: Vec<String> = list.into_iter().map(|s| s.trim().to_string()).filter(|s| s.starts_with('[') && s.ends_with(']')).collect();
+    Project::update(&current(&state)?, |p| {
+        p.file.notation = list.clone();
+        Ok(())
+    })
+    .map_err(err)?;
+    Ok(list)
+}
+
+#[tauri::command]
+fn hotkeys_set(hotkeys: std::collections::BTreeMap<String, String>, rewind_on_resume: f64) -> Res<std::collections::BTreeMap<String, String>> {
+    let mut s = Settings::load();
+    s.hotkeys = hotkeys;
+    s.rewind_on_resume = Some(rewind_on_resume);
+    s.save().map_err(err)?;
+    Ok(Settings::load().effective_hotkeys())
+}
+
+#[tauri::command]
+fn hotkeys_default() -> std::collections::BTreeMap<String, String> {
+    engine::default_hotkeys()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .register_uri_scheme_protocol("media", |ctx, request| {
+            let reply = (|| {
+                let state = ctx.app_handle().state::<AppState>();
+                let dir = state.project.lock().unwrap().clone()?;
+                let id = request.uri().path().trim_start_matches('/').to_string();
+                let (path, _) = engine::playback_file(&dir, &id, &Settings::load()).ok()?;
+                let range = request.headers().get("range").and_then(|v| v.to_str().ok());
+                Some(media_protocol::serve(&path, range))
+            })()
+            .unwrap_or(media_protocol::Reply { status: 404, headers: vec![("Access-Control-Allow-Origin", "*".into())], body: Vec::new() });
+            let mut b = tauri::http::Response::builder().status(reply.status);
+            for (k, v) in reply.headers {
+                b = b.header(k, v);
+            }
+            b.body(reply.body).unwrap()
+        })
         .invoke_handler(tauri::generate_handler![
             project_new,
             project_open,
@@ -279,7 +395,16 @@ fn main() {
             models_install,
             models_import_zip,
             settings_get,
-            settings_set
+            settings_set,
+            editor_info,
+            peaks,
+            retime_turn,
+            clean_masks,
+            transcript_save,
+            replace_in_project,
+            notation_set,
+            hotkeys_set,
+            hotkeys_default
         ])
         .run(tauri::generate_context!())
         .expect("Prism Transcribe could not start");

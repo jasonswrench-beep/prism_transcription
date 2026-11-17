@@ -48,6 +48,35 @@ pub struct Settings {
     /// Threads for recognition; empty for up to 8.
     #[serde(default)]
     pub threads: Option<i32>,
+    /// The editor's keys, action name to key (T4: all remappable). Missing actions use [`default_hotkeys`].
+    #[serde(default)]
+    pub hotkeys: std::collections::BTreeMap<String, String>,
+    /// Seconds played again when playback resumes after a pause (T4, default 1.5).
+    #[serde(default)]
+    pub rewind_on_resume: Option<f64>,
+}
+
+/// The editor's default keys (T4): foot-pedal style F-keys, and Ctrl+T for a timestamp. Key names are the browser's
+/// `KeyboardEvent.key`, with modifiers first ("Control+t").
+pub fn default_hotkeys() -> std::collections::BTreeMap<String, String> {
+    [
+        ("play_pause", "F4"),
+        ("back", "F3"),
+        ("forward", "F5"),
+        ("slower", "F6"),
+        ("faster", "F7"),
+        ("timestamp", "Control+t"),
+        ("notation", "Control+k"),
+        ("mark_checked", "Control+m"),
+        ("find", "Control+f"),
+        ("snapshot", "Control+Shift+s"),
+        ("next_turn", "Control+ArrowDown"),
+        ("previous_turn", "Control+ArrowUp"),
+        ("play_turn", "Control+Enter"),
+    ]
+    .into_iter()
+    .map(|(a, k)| (a.to_string(), k.to_string()))
+    .collect()
 }
 
 impl Settings {
@@ -75,6 +104,21 @@ impl Settings {
         self.ffmpeg.clone().filter(|p| p.is_file()).or_else(media::find_ffmpeg)
     }
 
+    /// Every action's key: the user's choice, else the default.
+    pub fn effective_hotkeys(&self) -> std::collections::BTreeMap<String, String> {
+        let mut k = default_hotkeys();
+        for (a, key) in &self.hotkeys {
+            if k.contains_key(a) && !key.trim().is_empty() {
+                k.insert(a.clone(), key.clone());
+            }
+        }
+        k
+    }
+
+    pub fn rewind(&self) -> f64 {
+        self.rewind_on_resume.filter(|r| (0.0..=10.0).contains(r)).unwrap_or(1.5)
+    }
+
     pub fn threads(&self) -> i32 {
         self.threads.filter(|t| *t > 0).unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get().min(8) as i32).unwrap_or(4))
     }
@@ -94,6 +138,11 @@ pub fn import(dir: &Path, file: &Path, fields: ImportFields, copy: bool, ffmpeg:
     })?;
     match media::to_16k_wav(&src, &wav16, ffmpeg, progress) {
         Ok(info) => {
+            if let Ok(pk) = media::peaks_from_wav(&wav16, PEAKS_PER_SECOND) {
+                let p = Project::open(dir)?;
+                std::fs::create_dir_all(p.cache_dir())?;
+                std::fs::write(peaks_path(&p, &id), pk.iter().map(|x| *x as u8).collect::<Vec<u8>>())?;
+            }
             Project::update(dir, |p| {
                 let m = p.media_mut(&id)?;
                 m.duration = info.duration;
@@ -221,4 +270,81 @@ pub fn export(p: &Project, id: &str, format: ExportFormat, out: &Path, opts: &pr
         ExportFormat::Word => std::fs::write(out, export::to_docx(&t, &m.fields.label, date, &m.fields.label, opts)?)?,
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// The editor (phase 2)
+// ---------------------------------------------------------------------------------------------------------
+
+const PEAKS_PER_SECOND: u32 = 50;
+
+fn peaks_path(p: &Project, id: &str) -> PathBuf {
+    p.cache_dir().join(format!("{id}.peaks"))
+}
+
+/// The waveform for a recording, 50 (min, max) pairs a second. Cached in the project; made from the 16 kHz copy if
+/// it is still in `temp`, or by decoding the recording again.
+pub fn peaks(dir: &Path, id: &str, settings: &Settings) -> Result<Vec<i8>> {
+    let p = Project::open(dir)?;
+    let cached = peaks_path(&p, id);
+    if let Ok(b) = std::fs::read(&cached) {
+        return Ok(b.into_iter().map(|x| x as i8).collect());
+    }
+    let wav16 = wav16_path(&p, id);
+    let made_here = !wav16.exists();
+    if made_here {
+        media::to_16k_wav(&p.media_path(p.media(id)?), &wav16, settings.ffmpeg().as_deref(), &mut |_| true)?;
+    }
+    let pk = media::peaks_from_wav(&wav16, PEAKS_PER_SECOND)?;
+    if made_here {
+        let _ = std::fs::remove_file(&wav16);
+    }
+    std::fs::create_dir_all(p.cache_dir())?;
+    std::fs::write(&cached, pk.iter().map(|x| *x as u8).collect::<Vec<u8>>())?;
+    Ok(pk)
+}
+
+pub fn peaks_per_second() -> u32 {
+    PEAKS_PER_SECOND
+}
+
+/// The file the editor plays: the original when WebView2 can play it (T1: playback uses the original), otherwise a
+/// WAV copy in `cache` made the first time. Returns the path and whether it is a copy.
+pub fn playback_file(dir: &Path, id: &str, settings: &Settings) -> Result<(PathBuf, bool)> {
+    let p = Project::open(dir)?;
+    let m = p.media(id)?;
+    let original = p.media_path(m);
+    if media::playable(&original) {
+        return Ok((original, false));
+    }
+    let copy = p.cache_dir().join(format!("{id}.play.wav"));
+    if !copy.exists() {
+        std::fs::create_dir_all(p.cache_dir())?;
+        media::to_16k_wav(&original, &copy, settings.ffmpeg().as_deref(), &mut |_| true)?;
+    }
+    Ok((copy, true))
+}
+
+/// Save a transcript from the editor: the notation list is rebuilt from the bracketed words first.
+pub fn save_transcript(dir: &Path, mut t: Transcript) -> Result<()> {
+    prism_transcribe_core::edit::refresh_notation(&mut t);
+    Project::open(dir)?.save_transcript(&t)?;
+    Ok(())
+}
+
+/// Find and replace in every transcript of the project (T4), keeping word times. Returns (media id, count) for
+/// each transcript that changed.
+pub fn replace_in_project(dir: &Path, find: &str, replace: &str, opts: &prism_transcribe_core::edit::FindOptions) -> Result<Vec<(String, usize)>> {
+    let p = Project::open(dir)?;
+    let mut out = Vec::new();
+    for m in &p.file.files {
+        if let Some(mut t) = p.load_transcript(&m.id)? {
+            let n = prism_transcribe_core::edit::replace_all(&mut t, find, replace, opts);
+            if n > 0 {
+                save_transcript(dir, t)?;
+                out.push((m.id.clone(), n));
+            }
+        }
+    }
+    Ok(out)
 }

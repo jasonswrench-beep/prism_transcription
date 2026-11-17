@@ -5,6 +5,7 @@
 //! <folder>/transcripts/<id>.json     one transcript per media file
 //! <folder>/media/                    copies of recordings, only when "Copy media into project" is chosen
 //! <folder>/temp/                     16 kHz copies, job checkpoints; emptied when jobs end ("Clean up")
+//! <folder>/cache/                    waveform peaks and playback copies; can always be rebuilt
 //! ```
 //!
 //! By default the project links to the original recordings (open decision 6). The original is never modified; its
@@ -90,6 +91,12 @@ pub struct MediaFile {
     pub error: Option<String>,
 }
 
+/// The notation menu's entries when a project starts (T4); the list is editable per project. `hh:mm:ss` is
+/// replaced by the playback time when inserted, and `…` marks where the cursor goes.
+pub fn default_notation() -> Vec<String> {
+    ["[inaudible hh:mm:ss]", "[unclear: …]", "[crosstalk]", "[laughter]", "[pause]", "[redacted]"].map(String::from).to_vec()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFile {
     pub format: String,
@@ -98,6 +105,8 @@ pub struct ProjectFile {
     pub created: String,
     #[serde(default)]
     pub files: Vec<MediaFile>,
+    #[serde(default = "default_notation")]
+    pub notation: Vec<String>,
 }
 
 /// What opening a project found about one recording.
@@ -156,7 +165,7 @@ impl Project {
         std::fs::create_dir_all(dir.join("temp"))?;
         let p = Project {
             dir: dir.to_path_buf(),
-            file: ProjectFile { format: PROJECT_FORMAT.into(), schema_version: PROJECT_SCHEMA_VERSION, name: name.into(), created: now(), files: Vec::new() },
+            file: ProjectFile { format: PROJECT_FORMAT.into(), schema_version: PROJECT_SCHEMA_VERSION, name: name.into(), created: now(), files: Vec::new(), notation: default_notation() },
         };
         p.save()?;
         Ok(p)
@@ -187,6 +196,11 @@ impl Project {
 
     pub fn temp_dir(&self) -> PathBuf {
         self.dir.join("temp")
+    }
+
+    /// Things kept between sessions that can always be rebuilt: waveform peaks, playback copies.
+    pub fn cache_dir(&self) -> PathBuf {
+        self.dir.join("cache")
     }
 
     pub fn media(&self, id: &str) -> Result<&MediaFile> {

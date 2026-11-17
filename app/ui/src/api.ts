@@ -58,13 +58,35 @@ export interface Speaker {
   role: string;
 }
 
+export type ReviewStatus = 'not_started' | 'first_pass' | 'checked' | 'de_identified' | 'final';
+
+export interface Snapshot {
+  name: string;
+  created: string;
+  turns: Turn[];
+}
+
 export interface Transcript {
   schema_version: number;
   media: string;
   speakers: Speaker[];
   turns: Turn[];
-  review: string;
-  provenance: { engine: string; pack: string; created: string; seconds: number };
+  notation?: unknown[];
+  snapshots: Snapshot[];
+  review: ReviewStatus;
+  checked_until?: number | null;
+  provenance: { engine: string; pack: string; created: string; seconds: number; expected_speakers?: number | null };
+}
+
+export interface EditorInfo {
+  url: string;
+  playback_copy: boolean;
+  has_video: boolean;
+  duration: number;
+  peaks_per_second: number;
+  notation: string[];
+  hotkeys: Record<string, string>;
+  rewind_on_resume: number;
 }
 
 export type Progress =
@@ -122,6 +144,7 @@ export type Timestamps = { mode: 'per_turn' } | { mode: 'every'; seconds: number
 export interface ExportOptions {
   timestamps: Timestamps;
   line_numbers: boolean;
+  clean: boolean;
 }
 
 export const api = {
@@ -138,6 +161,16 @@ export const api = {
   modelsStatus: () => invoke<ModelStatus>('models_status'),
   modelsInstall: () => invoke<void>('models_install'),
   modelsImportZip: (path: string) => invoke<ModelStatus>('models_import_zip', { path }),
+  editorInfo: (id: string) => invoke<EditorInfo>('editor_info', { id }),
+  peaks: (id: string) => invoke<number[]>('peaks', { id }),
+  retimeTurn: (turn: Turn, text: string, lo: number, hi: number) => invoke<Turn>('retime_turn', { turn, text, lo, hi }),
+  cleanMasks: (turns: Turn[]) => invoke<boolean[][]>('clean_masks', { turns }),
+  saveTranscript: (transcript: Transcript) => invoke<void>('transcript_save', { transcript }),
+  replaceInProject: (find: string, replace: string, options: { whole_word: boolean; match_case: boolean }) =>
+    invoke<[string, number][]>('replace_in_project', { find, replace, options }),
+  setNotation: (list: string[]) => invoke<string[]>('notation_set', { list }),
+  setHotkeys: (hotkeys: Record<string, string>, rewind_on_resume: number) => invoke<Record<string, string>>('hotkeys_set', { hotkeys, rewind_on_resume }),
+  defaultHotkeys: () => invoke<Record<string, string>>('hotkeys_default'),
   settings: () => invoke<Settings>('settings_get'),
   saveSettings: (settings: Settings) => invoke<Settings>('settings_set', { settings }),
 };

@@ -12,6 +12,12 @@
   --mark-text: #1b1b24;
   --danger: #b3261e;
   --notice: #eef3ff;
+  --now: #c9e3ff;
+  --now-text: #0b2440;
+  --find: #ffd8a8;
+  --find-now: #ff9f43;
+  --wave: #7c7c96;
+  --checked: rgb(75 63 216 / 0.08);
   /* The icon's gradient, one hue per speaker (shown as a bar, never as the only cue). */
   --s1: #00b8b2; --s2: #0778d6; --s3: #4b52e0; --s4: #8a2be2; --s5: #c406c2; --s6: #e02f80; --s7: #e36a2c; --s8: #c98a00;
   font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
@@ -34,6 +40,12 @@
     --mark-text: #fff6c9;
     --danger: #ff8a80;
     --notice: #23263a;
+    --now: #1d4f86;
+    --now-text: #ffffff;
+    --find: #6b4a1a;
+    --find-now: #b36a14;
+    --wave: #9a9ab4;
+    --checked: rgb(143 134 255 / 0.12);
   }
 }
 
@@ -125,3 +137,45 @@ mark.unsure { background: var(--mark); color: var(--mark-text); border-radius: 2
 .about h3 { font-size: 0.95rem; margin: 0 0 0.3rem; }
 .about p, .about ul { margin: 0.3rem 0; color: var(--muted); }
 .about ul { padding-left: 1.2rem; }
+
+/* ---- The editor (phase 2) ---- */
+.editor { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.editor-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--line); background: var(--surface); }
+.editor-title { margin-right: auto; }
+.review select, .boost select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.25rem 0.4rem; margin-left: 0.4rem; }
+.save-state { color: var(--muted); font-size: 0.9em; }
+.editor-panes { display: grid; grid-template-columns: minmax(0, 1fr) 380px; flex: 1; min-height: 0; }
+.turn-list { overflow: auto; padding: 0.8rem 1rem 4rem; }
+.turn-list .turn { display: grid; grid-template-columns: 9.5rem 1fr; gap: 0.6rem; margin: 0 0 0.6rem; padding: 0.15rem 0 0.15rem 0.6rem; }
+.turn-list .turn.checked { background: var(--checked); }
+.turn-head { display: grid; align-content: start; font-size: 0.9em; }
+.turn-head .who { font-weight: 600; }
+.turn-text { line-height: 1.7; padding: 0.15rem 0.35rem; border-radius: 4px; outline: none; white-space: pre-wrap; max-width: 52rem; }
+.turn-text:focus { box-shadow: 0 0 0 2px var(--focus); }
+.turn-text[contenteditable="false"] { color: var(--muted); }
+::highlight(pt-current) { background-color: var(--now); color: var(--now-text); }
+::highlight(pt-unsure) { background-color: var(--mark); color: var(--mark-text); }
+::highlight(pt-find) { background-color: var(--find); }
+::highlight(pt-find-current) { background-color: var(--find-now); color: #000; }
+.media-pane { border-left: 1px solid var(--line); padding: 0.8rem; display: grid; align-content: start; gap: 0.6rem; overflow: auto; background: var(--surface); }
+.media-pane video.video { width: 100%; background: #000; border-radius: 6px; }
+.media-pane video.audio-only { display: none; }
+.wave { width: 100%; height: 110px; cursor: pointer; background: var(--bg); border-radius: 6px; }
+.overview { width: 100%; height: 22px; cursor: pointer; }
+.transport { display: grid; gap: 0.5rem; }
+.clock { font-variant-numeric: tabular-nums; font-size: 1.1rem; }
+.rate { min-width: 6.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.find-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 0.6rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--line); background: var(--notice); }
+.find-bar .react-aria-TextField { min-width: 12rem; }
+.find-count { min-width: 5rem; color: var(--muted); }
+.react-aria-RadioGroup[data-orientation="horizontal"] { display: flex; gap: 0.8rem; }
+.notation-list { display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 4px; outline: none; }
+.notation-list .react-aria-ListBoxItem { padding: 0.35rem 0.5rem; border-radius: 4px; cursor: pointer; outline: none; }
+.notation-list .react-aria-ListBoxItem[data-focused] { background: var(--accent); color: var(--accent-text); }
+.notation-edit { width: 100%; font-family: inherit; }
+.snapshot-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.snapshot-list li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.keys-table { border-collapse: collapse; width: 100%; }
+.keys-table th { text-align: left; font-weight: normal; padding: 0.25rem 0.5rem 0.25rem 0; }
+.keys-table td { padding: 0.25rem 0.4rem; font-variant-numeric: tabular-nums; }
+.keys-table td.clash { color: var(--danger); font-weight: 600; }

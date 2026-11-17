@@ -4,18 +4,25 @@ Prism Transcribe turns interview and focus-group recordings into speaker-labelle
 researcher's own Windows computer, and sends them to PrismQDA. Nothing leaves the machine: the audio, the transcript
 and every file in between stay local, and the speech models run on the computer itself.
 
-**Status: phase 1 (a file in, a speaker-labelled Word file out).** The app can create or open a project, import
-recordings, download and check its speech models (or import them from an offline zip), transcribe one file at a time
-with progress and a resumable job, show the transcript (read-only, unsure words tinted), and export it to Word or
-plain text. Editing is phase 2. There is no installer yet. The plan is in the specification (six phases,
-requirements T1 to T8); phase 0's measurements are in [docs/PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md). What only a
-person can check is in [TESTING-TODO.md](TESTING-TODO.md).
+**Status: phase 2 (the editor).** The app creates or opens a project, imports recordings, installs and checks its
+speech models (or imports them from an offline zip), transcribes one file at a time with a resumable job, and opens
+each transcript in an editor:
+- **Panes:** the transcript beside the recording, with its picture when it has one, a waveform and a whole-file overview.
+- **Playback:** click a word to play from it, with the playing word highlighted. Speed goes from 0.5 to 2.0 at natural pitch, with a volume boost.
+- **Keys and notation:** foot-pedal style keys that are all remappable, rewind on resume, and a notation menu editable per project.
+- **Keeping and reviewing:** unlimited undo, autosave every 30 seconds, named snapshots, a review status, and a "checked up to here" marker.
+- **Searching and output:** find and replace in a transcript or the whole project, a clean view, and Word or plain-text export, verbatim or clean.
+
+Edited words keep their times (T5). Speakers (rename, merge, split) are phase 3. There is no installer yet. The plan is
+in the specification (six phases, requirements T1 to T8); phase 0's measurements are in
+[docs/PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md). What only a person can check is in
+[TESTING-TODO.md](TESTING-TODO.md).
 
 ## Layout
 
 | Folder | What it holds |
 |---|---|
-| `crates/core` | The transcript data model (JSON, schema version 1), projects (one folder each) and the Word and text exports. |
+| `crates/core` | The transcript data model (JSON, schema version 1), projects (one folder each), the editing rules (word times kept through edits, notation, find and replace, the clean view) and the Word and text exports. |
 | `crates/media` | Decoding: WAV, MP3, M4A, FLAC and OGG in Rust; video and other formats through an FFmpeg program if one is found. Writes the 16 kHz mono copy the speech engine reads. |
 | `crates/speech` | The speech engine adapter (C5): detect voice, recognize speech, label speakers, behind one small contract, with sherpa-onnx as the first plugin; the resumable transcription job; the model manager (download with SHA-256 checks, offline zip). Written to move into the shared core unchanged (see [CORE-REQUESTS.md](CORE-REQUESTS.md)). |
 | `crates/engine` | Import, transcribe and export joined up, for the app and for `prism-transcribe-cli`. |

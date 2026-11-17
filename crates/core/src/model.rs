@@ -68,8 +68,9 @@ impl Turn {
     }
 }
 
-/// A standard notation mark in the transcript: [inaudible 00:12:03], [crosstalk], [laughter] ... (T4; the editor
-/// inserts them in phase 2). `turn` and `word` say where it sits: before word `word` of turn `turn`.
+/// A standard notation mark: [inaudible 00:12:03], [crosstalk], [laughter] ... (T4). The editor keeps notation
+/// inline, as one bracketed word in the turn's text; this list is rebuilt from those words on save
+/// (`edit::refresh_notation`) for exports that want it apart. `turn` and `word` locate the bracketed word.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NotationTag {
     pub kind: String,
@@ -125,6 +126,9 @@ pub struct Transcript {
     pub snapshots: Vec<Snapshot>,
     #[serde(default)]
     pub review: ReviewStatus,
+    /// How far the user has checked, in seconds (the progress marker, T4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_until: Option<f64>,
     #[serde(default)]
     pub provenance: Provenance,
 }
@@ -147,6 +151,7 @@ impl Transcript {
             notation: Vec::new(),
             snapshots: Vec::new(),
             review: ReviewStatus::NotStarted,
+            checked_until: None,
             provenance: Provenance::default(),
         }
     }

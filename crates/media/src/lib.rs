@@ -359,3 +359,64 @@ mod tests {
         }
     }
 }
+
+/// Waveform peaks for the editor: `per_second` pairs of (min, max) a second, scaled to -127..127, read from a 16 kHz
+/// WAV. 50 a second keeps an hour at 360 kB.
+pub fn peaks_from_wav(path: &Path, per_second: u32) -> Result<Vec<i8>> {
+    let mut r = hound::WavReader::open(path).map_err(|e| MediaError::Decode(e.to_string()))?;
+    let spec = r.spec();
+    let step = (spec.sample_rate / per_second).max(1) as usize;
+    let channels = spec.channels.max(1) as usize;
+    let mut out = Vec::with_capacity(r.duration() as usize / step * 2 + 2);
+    let (mut lo, mut hi, mut n) = (0i32, 0i32, 0usize);
+    let scale = |v: i32| (v.clamp(-32768, 32767) / 258) as i8;
+    for (i, s) in r.samples::<i16>().enumerate() {
+        if i % channels != 0 {
+            continue;
+        }
+        let v = s.map_err(|e| MediaError::Decode(e.to_string()))? as i32;
+        lo = lo.min(v);
+        hi = hi.max(v);
+        n += 1;
+        if n == step {
+            out.push(scale(lo));
+            out.push(scale(hi));
+            (lo, hi, n) = (0, 0, 0);
+        }
+    }
+    if n > 0 {
+        out.push(scale(lo));
+        out.push(scale(hi));
+    }
+    Ok(out)
+}
+
+/// The file types WebView2 plays directly. Anything else is played from a WAV copy made at first use.
+pub const PLAYABLE_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "mp4", "webm"];
+
+pub fn playable(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).map(|e| PLAYABLE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod peak_tests {
+    use super::*;
+
+    #[test]
+    fn peaks_follow_the_level() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.wav");
+        let spec = hound::WavSpec { channels: 1, sample_rate: 16_000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut w = hound::WavWriter::create(&p, spec).unwrap();
+        for i in 0..32_000 {
+            // One loud second, then one quiet second.
+            let amp = if i < 16_000 { 16_000.0 } else { 1_000.0 };
+            w.write_sample(((i as f64 * 0.3).sin() * amp) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+        let pk = peaks_from_wav(&p, 50).unwrap();
+        assert_eq!(pk.len(), 200, "50 pairs a second for 2 s");
+        assert!(pk[1] > 55 && pk[0] < -55, "loud: {} {}", pk[0], pk[1]);
+        assert!(pk[199] < 5 && pk[198] > -5, "quiet: {} {}", pk[198], pk[199]);
+    }
+}

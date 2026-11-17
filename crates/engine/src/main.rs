@@ -5,7 +5,7 @@
 //!   prism-transcribe-cli new <folder> <name>
 //!   prism-transcribe-cli import <project> <recording> [--label L] [--date D] [--speakers N] [--language xx] [--copy]
 //!   prism-transcribe-cli transcribe <project> <id>
-//!   prism-transcribe-cli export <project> <id> <out.docx|out.txt> [--timestamps turn|none|<seconds>] [--line-numbers]
+//!   prism-transcribe-cli export <project> <id> <out.docx|out.txt> [--timestamps turn|none|<seconds>] [--line-numbers] [--clean]
 //!   prism-transcribe-cli run <recording> --out <out.docx|out.txt> [--speakers N] [--project <folder>]
 
 use prism_transcribe_core::export::{ExportOptions, Timestamps};
@@ -36,7 +36,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1).peekable();
     while let Some(x) = it.next() {
         if let Some(k) = x.strip_prefix("--") {
-            if matches!(k, "copy" | "line-numbers") {
+            if matches!(k, "copy" | "line-numbers" | "clean") {
                 a.flags.push(k.into());
             } else {
                 a.opts.insert(k.into(), it.next().unwrap_or_else(|| usage()));
@@ -76,7 +76,7 @@ fn export_opts(a: &Args) -> ExportOptions {
         Some("none") => Timestamps::None,
         Some(n) => Timestamps::Every { seconds: n.parse().unwrap_or_else(|_| usage()) },
     };
-    ExportOptions { timestamps, line_numbers: a.flags.iter().any(|f| f == "line-numbers") }
+    ExportOptions { timestamps, line_numbers: a.flags.iter().any(|f| f == "line-numbers"), clean: a.flags.iter().any(|f| f == "clean") }
 }
 
 fn main() {

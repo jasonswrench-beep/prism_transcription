@@ -22,6 +22,10 @@ pub struct ExportOptions {
     /// Word only: number the lines.
     #[serde(default)]
     pub line_numbers: bool,
+    /// Hide fillers and repeated words (the clean view's rule, `edit::clean_mask`); verbatim when false (the
+    /// default, open decision 10).
+    #[serde(default)]
+    pub clean: bool,
 }
 
 /// The header line: "INT-07 · 2026-03-04" (the date is the recording's, when the user gave one).
@@ -44,6 +48,14 @@ fn paragraphs(t: &Transcript, opts: &ExportOptions) -> Vec<Para> {
     t.turns
         .iter()
         .map(|turn| {
+            let cleaned;
+            let turn = if opts.clean {
+                let keep = crate::edit::clean_mask(&turn.words);
+                cleaned = crate::model::Turn { words: turn.words.iter().zip(keep).filter(|(_, k)| *k).map(|(w, _)| w.clone()).collect(), ..turn.clone() };
+                &cleaned
+            } else {
+                turn
+            };
             let speaker = t.speaker(&turn.speaker).map(|s| s.display_name().to_string()).unwrap_or_else(|| turn.speaker.clone());
             let (stamp, body) = match opts.timestamps {
                 Timestamps::PerTurn => (Some(format!("[{}]", hms(turn.start))), turn.text()),
@@ -171,6 +183,10 @@ mod tests {
         let s = to_text(&t, "INT-07", Some("2026-03-04"), &ExportOptions::default());
         assert_eq!(s, "INT-07 \u{b7} 2026-03-04\n\n[00:00:00] Interviewer: Hello, Maria.\n\n[00:00:02] Speaker 2: Hi there.\n\n");
         let none = to_text(&t, "INT-07", None, &ExportOptions { timestamps: Timestamps::None, ..Default::default() });
+        let mut um = t.clone();
+        um.turns[0].words.insert(0, crate::model::Word { text: "Um,".into(), start: 0.3, end: 0.45, confidence: 1.0, speaker: "S1".into() });
+        assert!(to_text(&um, "x", None, &ExportOptions::default()).contains("Interviewer: Um, Hello,"), "verbatim keeps it");
+        assert!(to_text(&um, "x", None, &ExportOptions { clean: true, ..Default::default() }).contains("Interviewer: Hello, Maria."), "clean hides it");
         assert!(none.starts_with("INT-07\n\nInterviewer: Hello,"));
         let every = to_text(&t, "x", None, &ExportOptions { timestamps: Timestamps::Every { seconds: 2.0 }, ..Default::default() });
         assert!(every.contains("Interviewer: [00:00:00] Hello, Maria."), "{every}");

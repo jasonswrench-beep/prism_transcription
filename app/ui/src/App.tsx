@@ -33,6 +33,7 @@ import {
   type Transcript,
 } from './api';
 import { duration, hms, LOW_CONFIDENCE, progressText } from './format';
+import { Editor } from './editor/Editor';
 
 const MEDIA_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'mov', 'mkv', 'avi', 'webm'];
 const STATUS_WORDS: Record<MediaFile['status'], string> = {
@@ -59,6 +60,8 @@ export function App() {
   const [importing, setImporting] = useState(0);
   const [newProject, setNewProject] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [editing, setEditing] = useState<{ file: MediaFile; transcript: Transcript } | null>(null);
+  const [exporting, setExporting] = useState<MediaFile | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -71,6 +74,7 @@ export function App() {
   useEffect(() => {
     api.modelsStatus().then(setModels);
     api.settings().then(setSettings);
+    refresh(); // a reloaded window finds the project the app still has open
     const offs = [
       on<JobEvent>('job', (e) => {
         if (e.finished) {
@@ -127,6 +131,11 @@ export function App() {
     setImportPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
+  const openEditor = async (f: MediaFile) => {
+    const t = await api.transcript(f.id);
+    if (t) setEditing({ file: f, transcript: t });
+  };
+
   const exportAs = async (f: MediaFile, kind: 'docx' | 'txt', options: ExportOptions) => {
     const path = await save({
       title: kind === 'docx' ? 'Export to Word' : 'Export to plain text',
@@ -179,7 +188,19 @@ export function App() {
         <ModelsPanel models={models} settings={settings} install={install} onNotice={setNotice} onStatus={setModels} />
       )}
 
-      {!project ? (
+      {editing && project ? (
+        <Editor
+          file={editing.file}
+          transcript={editing.transcript}
+          onClose={() => {
+            setEditing(null);
+            setSelected(editing.file.id);
+            api.transcript(editing.file.id).then(setTranscript);
+          }}
+          onSaved={() => {}}
+          onNotice={setNotice}
+        />
+      ) : !project ? (
         <main className="empty">
           <h2>Start with a project</h2>
           <p>A project is one folder that holds your transcripts. The recordings stay where they are unless you choose to copy them in.</p>
@@ -211,7 +232,8 @@ export function App() {
                     onSelect={() => setSelected(f.id)}
                     onTranscribe={() => transcribe(f)}
                     onCancel={() => api.cancel()}
-                    onExport={(kind, opts) => exportAs(f, kind, opts)}
+                    onExport={() => setExporting(f)}
+                    onEdit={() => openEditor(f)}
                   />
                 ))}
               </ul>
@@ -270,6 +292,15 @@ export function App() {
           }
         }}
       />
+      <ExportDialog
+        file={exporting}
+        onClose={() => setExporting(null)}
+        onExport={(kind, opts) => {
+          const f = exporting!;
+          setExporting(null);
+          exportAs(f, kind, opts);
+        }}
+      />
       <SettingsDialog
         isOpen={settingsOpen}
         settings={settings}
@@ -294,12 +325,12 @@ function FileRow(props: {
   onSelect: () => void;
   onTranscribe: () => void;
   onCancel: () => void;
-  onExport: (kind: 'docx' | 'txt', options: ExportOptions) => void;
+  onExport: () => void;
+  onEdit: () => void;
 }) {
   const { file: f, job } = props;
   const p = progressText(job?.progress ?? null);
   const done = f.status === 'transcribed';
-  const opts: ExportOptions = { timestamps: { mode: 'per_turn' }, line_numbers: false };
   return (
     <li className={props.selected ? 'file selected' : 'file'}>
       <Button className="file-main" onPress={props.onSelect} aria-current={props.selected ? 'true' : undefined}>
@@ -326,11 +357,15 @@ function FileRow(props: {
         </div>
       ) : (
         <div className="row actions">
+          {done && (
+            <Button className="primary" onPress={props.onEdit}>
+              Edit
+            </Button>
+          )}
           <Button className={done ? undefined : 'primary'} isDisabled={props.busy || !props.modelsReady || f.status === 'failed'} onPress={props.onTranscribe}>
             {done ? 'Transcribe again' : 'Transcribe'}
           </Button>
-          <Button isDisabled={!done} onPress={() => props.onExport('docx', opts)}>Export to Word…</Button>
-          <Button isDisabled={!done} onPress={() => props.onExport('txt', opts)}>Export to text…</Button>
+          <Button isDisabled={!done} onPress={props.onExport}>Export…</Button>
         </div>
       )}
       {f.status === 'failed' && f.error && <p className="error">{f.error}</p>}
@@ -590,6 +625,58 @@ function SettingsDialog(props: { isOpen: boolean; settings: Settings; models: Mo
             <Button onPress={props.onClose}>Cancel</Button>
             <Button className="primary" onPress={() => props.onSave({ ...s, threads: threads === 'auto' ? null : Number(threads) })}>
               Save
+            </Button>
+          </div>
+        </Dialog>
+      </Modal>
+    </ModalOverlay>
+  );
+}
+
+function ExportDialog(props: { file: MediaFile | null; onClose: () => void; onExport: (kind: 'docx' | 'txt', o: ExportOptions) => void }) {
+  const [kind, setKind] = useState<'docx' | 'txt'>('docx');
+  const [stamps, setStamps] = useState('per_turn');
+  const [clean, setClean] = useState(false);
+  const [lines, setLines] = useState(false);
+  return (
+    <ModalOverlay isOpen={!!props.file} onOpenChange={(o) => !o && props.onClose()} isDismissable>
+      <Modal>
+        <Dialog>
+          <Heading slot="title">Export {props.file?.label}</Heading>
+          <RadioGroup value={kind} onChange={(v) => setKind(v as 'docx' | 'txt')}>
+            <Label>Format</Label>
+            <Radio value="docx">Word (.docx)</Radio>
+            <Radio value="txt">Plain text (.txt)</Radio>
+          </RadioGroup>
+          <RadioGroup value={stamps} onChange={setStamps}>
+            <Label>Timestamps</Label>
+            <Radio value="per_turn">At the start of every turn</Radio>
+            <Radio value="every">Every 30 seconds</Radio>
+            <Radio value="none">None</Radio>
+          </RadioGroup>
+          <RadioGroup value={clean ? 'clean' : 'verbatim'} onChange={(v) => setClean(v === 'clean')}>
+            <Label>Text</Label>
+            <Radio value="verbatim">Verbatim: every word as said</Radio>
+            <Radio value="clean">Clean: fillers and repeated words left out</Radio>
+          </RadioGroup>
+          {kind === 'docx' && (
+            <Checkbox isSelected={lines} onChange={setLines}>
+              <span className="box" aria-hidden="true" /> Number the lines
+            </Checkbox>
+          )}
+          <div className="row end">
+            <Button onPress={props.onClose}>Cancel</Button>
+            <Button
+              className="primary"
+              onPress={() =>
+                props.onExport(kind, {
+                  timestamps: stamps === 'every' ? { mode: 'every', seconds: 30 } : stamps === 'none' ? { mode: 'none' } : { mode: 'per_turn' },
+                  line_numbers: kind === 'docx' && lines,
+                  clean,
+                })
+              }
+            >
+              Choose where to save…
             </Button>
           </div>
         </Dialog>
