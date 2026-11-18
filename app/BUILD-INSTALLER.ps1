@@ -39,6 +39,9 @@ if ([Environment]::ProcessorCount -ge 32) {
 
 $app = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $app
+# Paths given on the command line are read from where the build was started; the build moves between folders later.
+if ($NotesFile) { $NotesFile = (Resolve-Path $NotesFile).Path }
+if ($Whisper) { $Whisper = (Resolve-Path $Whisper).Path }
 
 Push-Location $root
 $pending = git status --porcelain
