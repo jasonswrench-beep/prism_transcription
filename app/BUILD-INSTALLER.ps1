@@ -21,8 +21,14 @@
 # through a temporary configuration, so no signing setting goes into tauri.conf.json or the repository. whisper-cli and
 # its DLLs are signed before they go in. check_signatures.py then checks the setup and every program inside it before
 # the SHA-256 is written, so the hash is the signed file's. The build stops if anything is unsigned or untimestamped.
+#
+# -Updates makes the setup something the program's Check for updates button accepts (docs\UPDATES.md): after the code
+# signature, it is signed with the update key (TAURI_SIGNING_PRIVATE_KEY_PATH names the key tools\make-update-key.ps1
+# made, TAURI_SIGNING_PRIVATE_KEY_PASSWORD its password), and target\release-assets\latest.json is written, with
+# -NotesFile's text as the notes. It stops if PUBKEY in app\src-tauri\src\updates.rs is empty or is not that key's public
+# half: such a program would refuse every update.
 
-param([switch]$Sign, [string]$Whisper)
+param([switch]$Sign, [string]$Whisper, [switch]$Updates, [string]$NotesFile = '')
 
 $ErrorActionPreference = 'Stop'
 if ([Environment]::ProcessorCount -ge 32) {
@@ -70,6 +76,18 @@ if ($Sign) {
         & $python (Join-Path $tools 'sign_windows.py') --ready
         if ($LASTEXITCODE) { throw 'signing cannot start: see what is missing above' }
     }
+}
+$updateKey = $null
+if ($Updates) {
+    $updateKey = $env:TAURI_SIGNING_PRIVATE_KEY_PATH
+    if (-not $updateKey -or -not (Test-Path $updateKey)) { throw 'TAURI_SIGNING_PRIVATE_KEY_PATH must name the update key file (tools\make-update-key.ps1 makes it)' }
+    if (-not (Test-Path "$updateKey.pub")) { throw "the public half of the update key is not beside it ($updateKey.pub)" }
+    $source = Get-Content (Join-Path $app 'src-tauri\src\updates.rs') -Raw
+    if ($source -notmatch 'pub const PUBKEY: &str = "([^"]*)";') { throw 'PUBKEY was not found in updates.rs' }
+    $built = $Matches[1]
+    if (-not $built) { throw 'PUBKEY in app\src-tauri\src\updates.rs is empty, so the program would not check for updates at all (tools\make-update-key.ps1 puts it there)' }
+    if ($built -ne (Get-Content "$updateKey.pub" -Raw).Trim()) { throw 'PUBKEY in updates.rs is not the public half of the update key; a program built like that would refuse every update' }
+    if ($NotesFile -and -not (Test-Path $NotesFile)) { throw "the notes file $NotesFile is not there" }
 }
 
 $work = Join-Path $root 'target\installer-work'
@@ -121,6 +139,23 @@ New-Item -ItemType Directory -Force $assets | Out-Null
 $upload = $installer.Name.Replace(' ', '-')
 Copy-Item $installer.FullName (Join-Path $assets $upload) -Force
 "$hash  $upload" | Out-File -Encoding ascii (Join-Path $assets "$upload.sha256.txt")
+if ($Updates) {
+    # After the code signature, because the update signature covers the exact bytes people download.
+    node (Join-Path $app 'ui\node_modules\@tauri-apps\cli\tauri.js') signer sign -f $updateKey (Join-Path $assets $upload)
+    if ($LASTEXITCODE) { throw 'the update signature could not be made' }
+    $sigFile = Join-Path $assets "$upload.sig"
+    if (-not (Test-Path $sigFile)) { throw 'the update signature file was not written' }
+    $version = (Get-Content (Join-Path $app 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
+    $notes = if ($NotesFile) { (Get-Content $NotesFile -Raw).Trim() } else { "See the release notes for version $version." }
+    $manifest = [ordered]@{
+        version   = $version
+        notes     = $notes
+        pub_date  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        platforms = [ordered]@{ 'windows-x86_64' = [ordered]@{ signature = (Get-Content $sigFile -Raw).Trim(); url = "https://github.com/jasonswrench-beep/prism_transcription/releases/download/v$version/$upload" } }
+    }
+    [System.IO.File]::WriteAllText((Join-Path $assets 'latest.json'), ($manifest | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding $false))
+    "Wrote $(Join-Path $assets 'latest.json'): after the release is published, upload it to the update-feed release (docs\UPDATES.md)"
+}
 "Built $($installer.FullName) from tag $tag"
 "To upload: $(Join-Path $assets $upload) and its .sha256.txt"
 "SHA-256 $hash"

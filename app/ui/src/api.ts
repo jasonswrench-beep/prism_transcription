@@ -305,6 +305,15 @@ export interface ExportCheck {
   files: { id: string; label: string; deidentified: boolean; check: FileCheck | null }[];
 }
 
+export interface UpdateState {
+  version: string;
+  set_up: boolean;
+  host: string;
+  blocked: 'not_set_up' | 'offline' | null;
+}
+
+export type UpdateFound = { available: false } | { available: true; version: string; notes: string; date: string };
+
 export interface SuiteApps {
   prismqda: string | null;
   hub: string | null;
@@ -323,6 +332,9 @@ export const api = {
   exportFile: (ids: string[], path: string, options: ExportOptions, deidentified: boolean) => invoke<void>('export', { ids, path, options, deidentified }),
   exportCheck: (ids: string[]) => invoke<ExportCheck>('export_check', { ids }),
   suiteApps: () => invoke<SuiteApps>('suite_apps'),
+  updateState: () => invoke<UpdateState>('update_state'),
+  updateCheck: () => invoke<UpdateFound>('update_check'),
+  updateInstall: () => invoke<{ installed: boolean; version?: string }>('update_install'),
   suiteOpen: (app: 'prismqda' | 'hub') => invoke<void>('suite_open', { app }),
   queue: () => invoke<Queue>('queue_get'),
   queueAdd: (ids: string[], start: boolean) => invoke<Queue>('queue_add', { ids, start }),

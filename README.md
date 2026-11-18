@@ -17,6 +17,7 @@ them through a batch queue, and opens each transcript in an editor:
 - **Searching:** find and replace in a transcript or the whole project, and a clean view.
 - **Batch queue:** any number of files, each with its own settings, in an order set by dragging; run, pause, resume and cancel, or hold one file. The queue survives a restart or crash and each file carries on from its last finished chunk; the computer stays awake while it runs, and a Windows notification and an in-app summary say what finished and what failed and why.
 - **Export:** Word and plain text; captions (SubRip and WebVTT, two lines of 42 characters, speaker names optional); the table (CSV and Excel, one row per turn); the PrismQDA package (.prismtx, specified in [docs/PRISMTX.md](docs/PRISMTX.md)); and a REFI-QDA project (.qdpx), which PrismQDA's own importer reads today with each turn timed, the recording linked and each speaker a case. The table and the packages can hold every transcript at once. Every export is verbatim or clean, de-identified or not. After a QDA export the app opens PrismQDA, or Prism Hub when PrismQDA is not installed.
+- **Help and updates:** Help (the button, or F1) has getting started, the keys as they are set now, privacy in brief and the version. Check for updates (Settings, and Help) asks once when pressed, never on its own, and installs only after a go-ahead and a signature check ([docs/UPDATES.md](docs/UPDATES.md)).
 - **De-identification:** a name list per project, typed or pasted from a roster, with consistent replacements (P07, [Participant 3], [City]) applied across every transcript, ignoring case and keeping possessives ("Maria's" becomes "P07's"). A pass flags email addresses, phone numbers, street addresses and postcodes, dates, birth details, ID-like numbers and web addresses, written or spoken. Another lists capitalised words that may be names, using Windows' own dictionary and a project word list. Every change is logged (original, replacement, file, time in the recording, when, who) in a key file kept apart from the transcripts and never exported, and a final check refuses a de-identified export while any name on the list is left.
 - **Privacy:** optional password protection of the transcripts and the key file (Argon2id and XChaCha20-Poly1305, from RustCrypto), the Offline switch, and a one-page data handling statement for ethics protocols, written from the project's actual set-up.
 
@@ -80,9 +81,11 @@ Also `models status|import-zip|export-zip` (add `heavy` for the heavy pack: `mod
 
 ## Privacy
 
-The program's only network call is the speech-model download, which happens only when the user starts it, from fixed
-addresses, with a SHA-256 check; the Offline switch in Settings blocks it before any connection is made. There is no
-telemetry. Temporary audio lives in the project's `temp` folder and is deleted when a job ends.
+The program connects only when the user starts it: the speech-model download (fixed addresses, a SHA-256 check), and
+Check for updates in Settings or Help, which asks github.com once for the newest version and installs it only after a
+go-ahead and a signature check ([docs/UPDATES.md](docs/UPDATES.md)). Nothing is checked on its own, and the Offline
+switch in Settings blocks both before any connection is made. There is no telemetry. Temporary audio lives in the
+project's `temp` folder and is deleted when a job ends.
 
 De-identification keeps its name map and change log in a key file (`.prismkey`) that the user saves outside the
 project folder; the app remembers where it is in its own settings, not in the project. Password protection (Privacy,

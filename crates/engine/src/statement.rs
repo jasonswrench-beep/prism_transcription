@@ -48,7 +48,7 @@ pub fn blocks(dir: &Path, settings: &Settings) -> Result<Vec<Block>> {
 
     b.push(Heading("Network use".into()));
     b.push(Para(format!(
-        "Prism Transcribe makes one kind of network call itself: downloading the speech models, from fixed addresses, each checked against its SHA-256, and only when the user starts it in the model manager. Updates to the app are checked by Prism Hub, not by Prism Transcribe. An Offline switch blocks every call; on this computer it is {}.",
+        "Prism Transcribe makes two kinds of network call, both only when the user starts them: downloading the speech models, from fixed addresses, each checked against its SHA-256; and Check for updates, which asks github.com once for the newest version and, only after the user agrees, downloads it and checks its signature before installing. Neither sends any recording, transcript or name, and nothing is checked on its own. An Offline switch blocks both; on this computer it is {}.",
         if settings.offline { "on, so the app makes no network call at all" } else { "off" }
     )));
 

@@ -20,8 +20,14 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 # The Windows notification when the batch queue finishes (T8), sent from Rust only.
 tauri-plugin-notification = "2"
+# The Check for updates button (docs/UPDATES.md): connects only when pressed, checks the download's signature.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "system-proxy", "zip"] }
 prism-transcribe-core.workspace = true
 prism-transcribe-speech.workspace = true
 prism-transcribe-engine.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tiny_http = "0.12"

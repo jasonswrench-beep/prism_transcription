@@ -259,3 +259,19 @@ mark.unsure { background: var(--mark); color: var(--mark-text); border-radius: 2
 .react-aria-DropIndicator[data-drop-target] { outline: 1px solid var(--accent); }
 .queue-summary { display: grid; gap: 0.3rem; }
 .queue-summary p, .queue-summary ul { margin: 0; }
+
+/* ---- Help and updates ---- */
+.help-modal .react-aria-Dialog { gap: 0.6rem; }
+.help-section { border-top: 1px solid var(--line); padding-top: 0.3rem; }
+.help-section h3, .updates h3 { margin: 0.3rem 0; font-size: 1rem; }
+.help-section p, .updates p { margin: 0.3rem 0; }
+.help-steps { margin: 0.3rem 0; padding-left: 1.3rem; display: grid; gap: 0.35rem; }
+kbd { font-family: inherit; font-size: 0.9em; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 0.3rem; background: var(--bg); }
+.keys-table th[scope="row"] { white-space: nowrap; }
+.updates { border-top: 1px solid var(--line); padding-top: 0.3rem; display: grid; gap: 0.4rem; }
+.update-found { display: grid; gap: 0.4rem; }
+@media print {
+  .no-print, .react-aria-ModalOverlay ~ *, .app > *:not(.react-aria-ModalOverlay) { display: none !important; }
+  .react-aria-ModalOverlay { position: static; background: none; }
+  .react-aria-Modal { width: auto; max-height: none; border: none; }
+}

@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod media_protocol;
+mod updates;
 
 use prism_transcribe_core::deid::{FileCheck, Flag, LogEntry, NameEntry, NameKind, Suggestion};
 use prism_transcribe_core::edit::{self, FindOptions};
@@ -725,6 +726,25 @@ fn queue_clear(app: tauri::AppHandle, state: State<AppState>) -> Res<Queue> {
     queue_change(&app, &state, |q| q.clear_finished())
 }
 
+// ---- Check for updates (docs/UPDATES.md): a button, never a timer ----
+
+#[tauri::command]
+fn update_state(app: tauri::AppHandle) -> serde_json::Value {
+    updates::state(&app, &updates::Feed::built_in(), Settings::load().offline)
+}
+
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle) -> Res<serde_json::Value> {
+    updates::check(&app, &updates::Feed::built_in(), Settings::load().offline).await
+}
+
+/// Download, check the signature and run the installer, which closes the program. Refused while a job runs.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle, state: State<'_, AppState>) -> Res<serde_json::Value> {
+    let busy = state.busy.lock().unwrap().is_some() || state.runner.load(Ordering::SeqCst);
+    updates::install(&app, &updates::Feed::built_in(), Settings::load().offline, busy).await
+}
+
 // ---- De-identification (T6) ----
 
 use engine::deid as di;
@@ -902,6 +922,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .register_uri_scheme_protocol("media", |ctx, request| {
             let reply = (|| {
@@ -981,7 +1002,10 @@ fn main() {
             queue_move,
             queue_clear,
             suite_apps,
-            suite_open
+            suite_open,
+            update_state,
+            update_check,
+            update_install
         ])
         .run(tauri::generate_context!())
         .expect("Prism Transcribe could not start");

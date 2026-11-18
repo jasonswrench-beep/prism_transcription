@@ -275,6 +275,15 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
     }
   }, [commitAll, props]);
 
+  // Save on request (before an update closes the program): the caller waits on the promise.
+  useEffect(() => {
+    const onSaveNow = (e: Event) => {
+      (e as CustomEvent<{ wait: Promise<unknown>[] }>).detail.wait.push(save(true));
+    };
+    window.addEventListener('prism-save-now', onSaveNow);
+    return () => window.removeEventListener('prism-save-now', onSaveNow);
+  }, [save]);
+
   // Autosave every 30 seconds (T4).
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;

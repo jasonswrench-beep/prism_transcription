@@ -74,6 +74,15 @@ SHA-256 `cf695b844d0e642ac59072eecd5709c5458e19ab282e2df43a1c1991c8a2c797`). **S
    A request for the suite's core to own the format, as PSTAT-1 and the family exchange are, would go in
    PrismQDA's `CORE-REQUESTS.md` as R7.
 
+## Updates (from the next release)
+
+8. **The update key, once:** `tools\make-update-key.ps1` (it asks Jason for a password and puts the public half in
+   `app\src-tauri\src\updates.rs`; commit that). Back up the key folder and the password.
+9. **Each release:** build with `-Updates -NotesFile <notes.txt>` as well, publish the release, then upload
+   `target\release-assets\latest.json` to the `update-feed` release (a pre-release made once, titled "Update feed: not a
+   download"). The steps are in [UPDATES.md](UPDATES.md). 0.1.0-alpha.1 has no key built in, so its Check for updates
+   says it is not set up; people move from it to the next version through Prism Hub or by installing the new setup.
+
 ## After the release
 
 - "Open in PrismQDA" today opens PrismQDA (found at `%LOCALAPPDATA%\PrismQDA`) and says to import the `.qdpx`; once

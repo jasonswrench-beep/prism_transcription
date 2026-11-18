@@ -43,6 +43,8 @@ import { DeidView } from './deid';
 import { PrivacyDialog, UnlockPanel } from './privacy';
 import { QueuePanel } from './queue';
 import { ExportDialog } from './export';
+import { HelpDialog } from './help';
+import { UpdatesCard } from './updates';
 
 const MEDIA_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'mov', 'mkv', 'avi', 'webm'];
 const STATUS_WORDS: Record<MediaFile['status'], string> = {
@@ -76,6 +78,18 @@ export function App() {
   const [details, setDetails] = useState<MediaFile | null>(null);
   const [deid, setDeid] = useState(false);
   const [privacy, setPrivacy] = useState(false);
+  const [help, setHelp] = useState(false);
+  // F1 opens Help anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F1' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        setHelp(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   const [queue, setQueue] = useState<Queue>({ state: 'idle', items: [] });
   const [summary, setSummary] = useState<QueueSummary | null>(null);
   // Command replies and events can arrive out of order: keep the newest queue.
@@ -198,6 +212,9 @@ export function App() {
         <Button onPress={() => setNewProject(true)}>New project</Button>
         <Button onPress={openProject}>Open project</Button>
         <Button onPress={() => setSettingsOpen(true)}>Settings</Button>
+        <Button onPress={() => setHelp(true)} aria-keyshortcuts="F1">
+          Help
+        </Button>
       </header>
 
       {notice && (
@@ -385,6 +402,7 @@ export function App() {
           if (kind === 'prismtx' || kind === 'qdpx') api.suiteApps().then(setHandoff);
         }}
       />
+      <HelpDialog isOpen={help} onClose={() => setHelp(false)} />
       {project && (
         <PrivacyDialog
           isOpen={privacy}
@@ -779,8 +797,8 @@ function SettingsDialog(props: {
             <span className="switch" aria-hidden="true" /> Offline: make no network calls at all
           </Switch>
           <p className="hint">
-            Prism Transcribe's only network call is the speech-model download you start yourself. Offline blocks it too. Recordings and
-            transcripts never leave this computer either way.
+            Prism Transcribe connects only when you start it: the speech-model download, and Check for updates. Offline blocks both.
+            Recordings and transcripts never leave this computer either way.
           </p>
           <RadioGroup value={threads} onChange={setThreads}>
             <Label>Processor threads for transcription</Label>
@@ -791,6 +809,7 @@ function SettingsDialog(props: {
           </RadioGroup>
           {props.models && <p className="hint">Speech models: {props.models.dir}</p>}
           {props.models && <HeavyPack models={props.models} settings={s} install={props.install} onWhisper={(w) => setS({ ...s, whisper: w || null })} onNotice={props.onNotice} onModels={props.onModels} />}
+          <UpdatesCard />
           <section className="about" aria-labelledby="about-heading">
             <h3 id="about-heading">About and credits</h3>
             <p>Prism Transcribe is free software under the Apache License 2.0. It runs these models on this computer:</p>

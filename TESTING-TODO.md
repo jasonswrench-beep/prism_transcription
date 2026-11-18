@@ -5,6 +5,14 @@ result in the matching results file.
 
 ## Phase 5
 
+- [ ] **Help.** Press F1 (or Help) on each screen: the steps read right, the keys listed are the ones set in the editor
+  (change one with the Keys button and look again), and Print gives a clean page. NVDA should read the steps and the table.
+- [ ] **Check for updates, end to end, once the update key exists** (docs/UPDATES.md): install a version built with the
+  key, publish a higher one with its `latest.json` in the update-feed release, then Check for updates: the notes show,
+  Install saves an open transcript, the installer runs without administrator rights, and the program opens at the new
+  version. Also: with Offline on, the button is not offered; during a transcription, Install is refused. Tested by the
+  build session only against a feed on this computer.
+
 The build session drove the queue and the export dialog through the real window: three files queued, one moved up
 with its button and one dragged to the top, one held and released, Pause during a transcription and Resume, the app
 killed in the middle of a file and reopened (the queue said it had stopped and Resume finished it), and the summary
