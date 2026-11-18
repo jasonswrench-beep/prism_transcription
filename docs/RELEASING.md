@@ -6,8 +6,15 @@ The first release is 0.1.0-alpha.1. With a pre-release suffix it is shown in Pri
 **Done for 0.1.0-alpha.1 (2026-11-17):** licences accepted, commit `2e10a80` tagged and built signed, the repository
 made public, and the release published as a pre-release:
 https://github.com/jasonswrench-beep/prism_transcription/releases/tag/v0.1.0-alpha.1 (setup 13,095,256 bytes,
-SHA-256 `cf695b844d0e642ac59072eecd5709c5458e19ab282e2df43a1c1991c8a2c797`). **Still to do:** the Prism Hub entry
-(step 6) and the PrismQDA item (step 7).
+SHA-256 `cf695b844d0e642ac59072eecd5709c5458e19ab282e2df43a1c1991c8a2c797`).
+
+**Done for 0.1.0-alpha.2 (2026-11-18):** commit `8c0ee05` tagged and built signed with `-Updates` (update key
+`4DB2DDFC6F5A6279`), published as a pre-release:
+https://github.com/jasonswrench-beep/prism_transcription/releases/tag/v0.1.0-alpha.2 (setup 13,602,976 bytes, SHA-256
+`47732b62c6ea8aca679c312e01e388b835f3dd8d15a2ad5b226cd2d5051f2e71`), and the `update-feed` release made, holding its
+`latest.json`. The first version Check for updates can update from.
+
+**Still to do:** the Prism Hub entry (step 6) and the PrismQDA item (step 7).
 
 ## In this repository
 
