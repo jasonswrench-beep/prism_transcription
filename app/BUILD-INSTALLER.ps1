@@ -114,5 +114,13 @@ if ($Sign -and -not $dryRun) {
 $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
 "$hash  $($installer.Name)" | Out-File -Encoding ascii "$($installer.FullName).sha256.txt"
 "Built from tag $tag, commit $commit" | Out-File -Encoding ascii "$($installer.FullName).source.txt"
+# The files to upload: GitHub turns spaces in asset names into dots, so the release carries the same setup with a hyphen
+# (Prism Hub's setupPattern matches this name).
+$assets = Join-Path $root 'target\release-assets'
+New-Item -ItemType Directory -Force $assets | Out-Null
+$upload = $installer.Name.Replace(' ', '-')
+Copy-Item $installer.FullName (Join-Path $assets $upload) -Force
+"$hash  $upload" | Out-File -Encoding ascii (Join-Path $assets "$upload.sha256.txt")
 "Built $($installer.FullName) from tag $tag"
+"To upload: $(Join-Path $assets $upload) and its .sha256.txt"
 "SHA-256 $hash"

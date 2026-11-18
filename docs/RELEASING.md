@@ -3,6 +3,12 @@
 The first release is 0.1.0-alpha.1. With a pre-release suffix it is shown in Prism Hub as a preview; a plain version
 (0.1.0) is shown as stable. Everything below that leaves this repository waits for Jason's go-ahead.
 
+**Done for 0.1.0-alpha.1 (2026-11-17):** licences accepted, commit `2e10a80` tagged and built signed, the repository
+made public, and the release published as a pre-release:
+https://github.com/jasonswrench-beep/prism_transcription/releases/tag/v0.1.0-alpha.1 (setup 13,095,256 bytes,
+SHA-256 `cf695b844d0e642ac59072eecd5709c5458e19ab282e2df43a1c1991c8a2c797`). **Still to do:** the Prism Hub entry
+(step 6) and the PrismQDA item (step 7).
+
 ## In this repository
 
 1. **Licences.** `python tools/third_party.py --check` must pass. Every licence is permissive except two MPL-2.0
@@ -14,16 +20,18 @@ The first release is 0.1.0-alpha.1. With a pre-release suffix it is shown in Pri
 3. **Build.** `app\BUILD-INSTALLER.ps1 -Sign -Whisper <whisper-cli folder>` on Jason's computer, after `az login`
    and with `OPENSTAGE_SIGN_TOOLS` and the `OPENSTAGE_SIGN_*` settings set (the suite's signing scripts; the same
    Azure Artifact Signing account as PrismQDA). It refuses an untagged or dirty tree, a tag that does not match the
-   version, and an unaccepted licence. The result is `target\release\bundle\nsis\Prism Transcribe_0.1.0-alpha.1_x64-
-   setup.exe` with its `.sha256.txt` and `.source.txt`. `-Whisper` puts whisper.cpp's whisper-cli (built by
+   version, and an unaccepted licence. The result is `target\release\bundle\nsis\Prism Transcribe_<version>_x64-
+   setup.exe` with its `.sha256.txt` and `.source.txt`, and the files to upload in `target\release-assets\`:
+   the same setup named `Prism-Transcribe_<version>_x64-setup.exe` (GitHub turns spaces in asset names into dots)
+   with its `.sha256.txt`. `-Whisper` puts whisper.cpp's whisper-cli (built by
    `tools\build-whisper.bat`) inside, signed, so the heavy pack needs no setup.
 4. **Try it.** Install on a computer without the development tools (TESTING-TODO, phase 5).
 
 ## On GitHub
 
 5. **A public repository with a release.** Prism Hub downloads only from a public repository's releases. The
-   repository (`jasonswrench-beep/prism_transcription`) is private today. Publish a release for the tag with the setup
-   and its `.sha256.txt`, titled "Prism Transcribe 0.1.0 alpha 1", the body in plain words with a "Download" list
+   repository (`jasonswrench-beep/prism_transcription`) is public since 2026-11-17. Publish a release for the tag,
+   marked as a pre-release for an alpha or beta, with the two files from `target\release-assets\`, titled "Prism Transcribe 0.1.0 alpha 1", the body in plain words with a "Download" list
    (each file's name, size and SHA-256) and a note that it is an alpha, as PrismQDA's betas do.
 
 ## In Prism Hub (C:\Dev\OpenStage-Hub, under its own CLAUDE.md)
@@ -42,7 +50,7 @@ The first release is 0.1.0-alpha.1. With a pre-release suffix it is shown in Pri
      "programFile": "prism-transcribe.exe",
      "quietSwitch": ["/P"],
      "expectedSigner": "Jason Wrench",
-     "setupPattern": "^Prism Transcribe_.*_x64-setup\\.exe$",
+     "setupPattern": "^Prism-Transcribe_.*_x64-setup\\.exe$",
      "comingSoonUntilReleased": true
    }
    ```
