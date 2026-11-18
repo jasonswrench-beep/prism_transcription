@@ -5,8 +5,11 @@ pub mod crypt;
 pub mod deid;
 pub mod edit;
 pub mod export;
+pub mod formats;
 pub mod model;
+pub mod package;
 pub mod project;
+pub mod queue;
 pub mod speakers;
 
 pub use model::SCHEMA_VERSION;

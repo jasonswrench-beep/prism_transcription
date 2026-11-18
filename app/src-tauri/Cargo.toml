@@ -18,6 +18,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# The Windows notification when the batch queue finishes (T8), sent from Rust only.
+tauri-plugin-notification = "2"
 prism-transcribe-core.workspace = true
 prism-transcribe-speech.workspace = true
 prism-transcribe-engine.workspace = true

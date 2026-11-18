@@ -155,6 +155,9 @@ pub struct ProjectFile {
     /// Set when the transcripts are password protected (open decision 7); see [`crate::crypt`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lock: Option<Lock>,
+    /// The batch queue (T8).
+    #[serde(default, skip_serializing_if = "crate::queue::Queue::is_unused")]
+    pub queue: crate::queue::Queue,
 }
 
 /// A new random project id (hex).
@@ -242,6 +245,7 @@ impl Project {
                 notation: default_notation(),
                 word_list: Vec::new(),
                 lock: None,
+                queue: Default::default(),
             },
         };
         p.save()?;

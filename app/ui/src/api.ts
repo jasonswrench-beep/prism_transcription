@@ -193,6 +193,8 @@ export interface ExportOptions {
   timestamps: Timestamps;
   line_numbers: boolean;
   clean: boolean;
+  /** Captions: show who is speaking. */
+  speaker_names: boolean;
 }
 
 // ---- De-identification (T6) ----
@@ -269,10 +271,43 @@ export interface FileCount {
   count: number;
 }
 
+// ---- The batch queue (T8) ----
+
+export interface QueueItem {
+  id: string;
+  state: 'waiting' | 'running' | 'held' | 'done' | 'failed' | 'cancelled';
+  error?: string | null;
+  added: string;
+  finished?: string | null;
+}
+
+export interface Queue {
+  state: 'idle' | 'running' | 'paused';
+  items: QueueItem[];
+  interrupted?: boolean;
+  /** Raised by every change: a lower one arriving late is older. */
+  rev?: number;
+}
+
+export interface QueueSummary {
+  done: string[];
+  failed: [string, string][];
+  seconds: number;
+}
+
+export interface QueueEvent {
+  queue: Queue;
+  summary: QueueSummary | null;
+}
+
 export interface ExportCheck {
-  deidentified: boolean;
   key: KeyState;
-  check: FileCheck | null;
+  files: { id: string; label: string; deidentified: boolean; check: FileCheck | null }[];
+}
+
+export interface SuiteApps {
+  prismqda: string | null;
+  hub: string | null;
 }
 
 export const api = {
@@ -285,8 +320,19 @@ export const api = {
   transcribe: (id: string) => invoke<void>('transcribe', { id }),
   cancel: () => invoke<void>('cancel'),
   transcript: (id: string) => invoke<Transcript | null>('transcript', { id }),
-  exportFile: (id: string, path: string, options: ExportOptions, deidentified: boolean) => invoke<void>('export', { id, path, options, deidentified }),
-  exportCheck: (id: string) => invoke<ExportCheck>('export_check', { id }),
+  exportFile: (ids: string[], path: string, options: ExportOptions, deidentified: boolean) => invoke<void>('export', { ids, path, options, deidentified }),
+  exportCheck: (ids: string[]) => invoke<ExportCheck>('export_check', { ids }),
+  suiteApps: () => invoke<SuiteApps>('suite_apps'),
+  suiteOpen: (app: 'prismqda' | 'hub') => invoke<void>('suite_open', { app }),
+  queue: () => invoke<Queue>('queue_get'),
+  queueAdd: (ids: string[], start: boolean) => invoke<Queue>('queue_add', { ids, start }),
+  queueStart: () => invoke<Queue>('queue_start'),
+  queuePause: () => invoke<Queue>('queue_pause'),
+  queueCancel: () => invoke<Queue>('queue_cancel'),
+  queueHold: (id: string, hold: boolean) => invoke<Queue>('queue_hold', { id, hold }),
+  queueRemove: (id: string) => invoke<Queue>('queue_remove', { id }),
+  queueMove: (id: string, to: number) => invoke<Queue>('queue_move', { id, to }),
+  queueClear: () => invoke<Queue>('queue_clear'),
   keyState: () => invoke<KeyState>('deid_key_state'),
   keyUse: (path: string) => invoke<KeyState>('deid_key_use', { path }),
   names: () => invoke<NameEntry[]>('deid_names'),

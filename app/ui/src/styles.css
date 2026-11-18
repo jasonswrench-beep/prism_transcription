@@ -241,3 +241,21 @@ mark.unsure { background: var(--mark); color: var(--mark-text); border-radius: 2
 .privacy-section h3 { margin: 0.3rem 0 0; font-size: 1rem; }
 .privacy-section p { margin: 0; }
 .statement { white-space: pre-wrap; font-family: inherit; font-size: 0.88em; max-height: 16rem; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem; margin: 0; }
+
+/* ---- The batch queue (phase 5) ---- */
+.queue { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem; margin-bottom: 0.7rem; display: grid; gap: 0.5rem; }
+.queue h3 { margin: 0; font-size: 1rem; }
+.queue-list { display: grid; gap: 2px; outline: none; }
+.queue-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "drag label actions" "drag state actions"; column-gap: 0.4rem; align-items: center; padding: 0.25rem 0.3rem; border-radius: 6px; outline: none; }
+.queue-item[data-focus-visible] { outline: 3px solid var(--focus); outline-offset: -2px; }
+.queue-item[data-dragging] { opacity: 0.5; }
+.queue-item[data-drop-target] { box-shadow: 0 -2px 0 var(--accent); }
+.queue-item .drag { grid-area: drag; cursor: grab; padding: 0.2rem 0.35rem; }
+.queue-label { grid-area: label; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-state { grid-area: state; color: var(--muted); font-size: 0.88em; overflow-wrap: anywhere; }
+.queue-item .row { grid-area: actions; gap: 0.2rem; }
+.queue-item.running .queue-state { color: var(--accent); font-weight: 600; }
+.queue-item.failed .queue-state { color: var(--danger); }
+.react-aria-DropIndicator[data-drop-target] { outline: 1px solid var(--accent); }
+.queue-summary { display: grid; gap: 0.3rem; }
+.queue-summary p, .queue-summary ul { margin: 0; }

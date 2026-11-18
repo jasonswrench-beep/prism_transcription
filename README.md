@@ -4,9 +4,9 @@ Prism Transcribe turns interview and focus-group recordings into speaker-labelle
 researcher's own Windows computer, and sends them to PrismQDA. Nothing leaves the machine: the audio, the transcript
 and every file in between stay local, and the speech models run on the computer itself.
 
-**Status: phase 4 (de-identification and privacy).** The app creates or opens a project, imports recordings, installs
-and checks its speech models (or imports them from an offline zip), transcribes one file at a time with a resumable
-job, and opens each transcript in an editor:
+**Status: phase 5 (hand-off and release), version 0.1.0-alpha.1, not yet released.** The app creates or opens a
+project, imports recordings, installs and checks its speech models (or imports them from an offline zip), transcribes
+them through a batch queue, and opens each transcript in an editor:
 - **Panes:** the transcript beside the recording, with its picture when it has one, a waveform and a whole-file overview with a colour band per speaker.
 - **Playback:** click a word to play from it, with the playing word highlighted. Speed goes from 0.5 to 2.0 at natural pitch, with a volume boost.
 - **Keys and notation:** foot-pedal style keys that are all remappable, rewind on resume, and a notation menu editable per project.
@@ -14,12 +14,15 @@ job, and opens each transcript in an editor:
 - **One microphone per person:** a file with a track or a channel per person is transcribed one microphone at a time, each a known speaker, with the other voices heard through it silenced, and overlaps marked [crosstalk].
 - **Two packs:** the light pack (Parakeet, 25 European languages) and the optional heavy pack (Whisper large-v3-turbo, about 99 languages), chosen per file or by its language.
 - **Keeping and reviewing:** unlimited undo, autosave every 30 seconds, named snapshots, a review status, and a "checked up to here" marker.
-- **Searching and output:** find and replace in a transcript or the whole project, a clean view, and Word or plain-text export, verbatim or clean.
+- **Searching:** find and replace in a transcript or the whole project, and a clean view.
+- **Batch queue:** any number of files, each with its own settings, in an order set by dragging; run, pause, resume and cancel, or hold one file. The queue survives a restart or crash and each file carries on from its last finished chunk; the computer stays awake while it runs, and a Windows notification and an in-app summary say what finished and what failed and why.
+- **Export:** Word and plain text; captions (SubRip and WebVTT, two lines of 42 characters, speaker names optional); the table (CSV and Excel, one row per turn); the PrismQDA package (.prismtx, specified in [docs/PRISMTX.md](docs/PRISMTX.md)); and a REFI-QDA project (.qdpx), which PrismQDA's own importer reads today with each turn timed, the recording linked and each speaker a case. The table and the packages can hold every transcript at once. Every export is verbatim or clean, de-identified or not. After a QDA export the app opens PrismQDA, or Prism Hub when PrismQDA is not installed.
 - **De-identification:** a name list per project, typed or pasted from a roster, with consistent replacements (P07, [Participant 3], [City]) applied across every transcript, ignoring case and keeping possessives ("Maria's" becomes "P07's"). A pass flags email addresses, phone numbers, street addresses and postcodes, dates, birth details, ID-like numbers and web addresses, written or spoken. Another lists capitalised words that may be names, using Windows' own dictionary and a project word list. Every change is logged (original, replacement, file, time in the recording, when, who) in a key file kept apart from the transcripts and never exported, and a final check refuses a de-identified export while any name on the list is left.
 - **Privacy:** optional password protection of the transcripts and the key file (Argon2id and XChaCha20-Poly1305, from RustCrypto), the Offline switch, and a one-page data handling statement for ethics protocols, written from the project's actual set-up.
 
-Edited words keep their times (T5). The PrismQDA hand-off, the other export formats and the batch queue are phase 5.
-There is no installer yet. The plan is in the
+Edited words keep their times (T5). The installer is set up (`app\BUILD-INSTALLER.ps1`, signed by the suite's
+signing scripts) but not built: the release steps, and what waits on a decision, are in
+[docs/RELEASING.md](docs/RELEASING.md). The plan is in the
 specification (six phases, requirements T1 to T8); phase 0's measurements are in
 [docs/PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md). What only a person can check is in
 [TESTING-TODO.md](TESTING-TODO.md).
@@ -28,7 +31,7 @@ specification (six phases, requirements T1 to T8); phase 0's measurements are in
 
 | Folder | What it holds |
 |---|---|
-| `crates/core` | The transcript data model (JSON, schema version 1), projects (one folder each), the editing rules (word times kept through edits, notation, find and replace, the clean view, speakers: merge, split, reassign), de-identification (name map, pattern and suggestion passes, audit log, key file, final check), password protection, and the Word and text exports. |
+| `crates/core` | The transcript data model (JSON, schema version 1), projects (one folder each), the editing rules (word times kept through edits, notation, find and replace, the clean view, speakers: merge, split, reassign), de-identification (name map, pattern and suggestion passes, audit log, key file, final check), password protection, the Word and text exports, captions and the table (`formats`), the .prismtx and .qdpx packages (`package`), and the batch queue's state (`queue`). |
 | `crates/media` | Decoding: WAV, MP3, M4A, FLAC and OGG in Rust; video and other formats through an FFmpeg program if one is found. Writes the 16 kHz mono copy the speech engine reads, or one per track or channel. |
 | `crates/speech` | The speech engine adapter (C5): detect voice, recognize speech, label speakers, behind one small contract, with sherpa-onnx as the first plugin and whisper.cpp (a separate program) as the second; the resumable transcription job; one microphone per person (bleed and crosstalk); the model manager (download with SHA-256 checks, offline zip). Written to move into the shared core unchanged (see [CORE-REQUESTS.md](CORE-REQUESTS.md)). |
 | `crates/engine` | Import, transcribe, de-identify and export joined up, for the app and for `prism-transcribe-cli`; Windows' spell checker for the suggestions pass; the data handling statement. |
@@ -70,9 +73,10 @@ prism-transcribe-cli run interview.m4a --out interview.docx --speakers 2 --label
 ```
 
 Also `models status|import-zip|export-zip` (add `heavy` for the heavy pack: `models install heavy`), `new`, `import`
-(with `--pack heavy-1` or `--tracks channels|tracks`), `transcribe`, `export` (with `--deidentified`, refused while a
-name from the key file's list is left), `check` (the final check) and `statement` (the data handling statement); run
-it with no arguments for the list. A password-protected project asks for its password on standard input.
+(with `--pack heavy-1` or `--tracks channels|tracks`), `transcribe`, `export` (to .docx, .txt, .srt, .vtt, .csv,
+.xlsx, .prismtx or .qdpx; several ids, or `all`, go into one table or package; `--speaker-names` for captions;
+`--deidentified`, refused while a name from the key file's list is left), `check` (the final check) and `statement`
+(the data handling statement); run it with no arguments for the list. A password-protected project asks for its password on standard input.
 
 ## Privacy
 

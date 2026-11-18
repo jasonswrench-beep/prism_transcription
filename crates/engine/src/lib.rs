@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 pub mod deid;
+pub mod power;
 pub mod spell;
 pub mod statement;
+pub mod suite;
 
 pub use job::Progress;
 
@@ -434,6 +436,17 @@ pub fn find_speakers_again(dir: &Path, id: &str, turns: &[Turn], expected: Optio
 pub enum ExportFormat {
     Text,
     Word,
+    /// SubRip captions.
+    Srt,
+    /// WebVTT captions.
+    Vtt,
+    /// The table, one row per turn, for one file or many.
+    Csv,
+    Xlsx,
+    /// The Prism transcript package, for PrismQDA.
+    Prismtx,
+    /// A REFI-QDA project, for PrismQDA today and other QDA programs.
+    Qdpx,
 }
 
 impl ExportFormat {
@@ -441,15 +454,26 @@ impl ExportFormat {
         match p.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "txt" => Some(Self::Text),
             "docx" => Some(Self::Word),
+            "srt" => Some(Self::Srt),
+            "vtt" => Some(Self::Vtt),
+            "csv" => Some(Self::Csv),
+            "xlsx" => Some(Self::Xlsx),
+            "prismtx" => Some(Self::Prismtx),
+            "qdpx" => Some(Self::Qdpx),
             _ => None,
         }
     }
+
+    /// Formats that hold many files in one export.
+    pub fn takes_many(self) -> bool {
+        matches!(self, Self::Csv | Self::Xlsx | Self::Prismtx | Self::Qdpx)
+    }
 }
 
-/// Export, and when `deidentified` is asked for, refuse unless the file passes the final check against the key
-/// file's name list (T6): no name on the list anywhere in what the export carries.
-pub fn export_checked(p: &Project, id: &str, format: ExportFormat, out: &Path, opts: &prism_transcribe_core::export::ExportOptions, deidentified: bool) -> Result<()> {
-    if deidentified {
+/// The final check for an export marked de-identified (T6): refused, naming the names left, unless every file
+/// passes against the key file's name list.
+pub fn require_deidentified(p: &Project, ids: &[String]) -> Result<()> {
+    for id in ids {
         let c = deid::check_one(&p.dir, id)?;
         if !c.passes() {
             let mut list: Vec<String> = c.leftovers.iter().map(|l| format!("{} ({})", l.text, l.place)).collect();
@@ -463,15 +487,67 @@ pub fn export_checked(p: &Project, id: &str, format: ExportFormat, out: &Path, o
             )));
         }
     }
-    export(p, id, format, out, opts)
+    Ok(())
+}
+
+/// Export, and when `deidentified` is asked for, refuse unless the file passes the final check.
+pub fn export_checked(p: &Project, id: &str, format: ExportFormat, out: &Path, opts: &prism_transcribe_core::export::ExportOptions, deidentified: bool) -> Result<()> {
+    export_files(p, &[id.to_string()], format, out, opts, deidentified)
+}
+
+/// Export one file, or (for the table) several in the order given.
+pub fn export_files(p: &Project, ids: &[String], format: ExportFormat, out: &Path, opts: &prism_transcribe_core::export::ExportOptions, deidentified: bool) -> Result<()> {
+    use prism_transcribe_core::formats;
+    if deidentified {
+        require_deidentified(p, ids)?;
+    }
+    if ids.len() != 1 && !format.takes_many() {
+        return Err(EngineError::Io(std::io::Error::other("this format holds one recording at a time")));
+    }
+    if matches!(format, ExportFormat::Prismtx | ExportFormat::Qdpx) {
+        use prism_transcribe_core::package::{self, Doc};
+        let mut loaded = Vec::new();
+        for id in ids {
+            let m = p.media(id)?;
+            let t = p.load_transcript(id)?.ok_or_else(|| EngineError::NoTranscript(m.fields.label.clone()))?;
+            loaded.push((m, t, p.media_path(m)));
+        }
+        let docs: Vec<Doc> = loaded.iter().map(|(m, t, path)| Doc { media: m, transcript: t, path: path.clone() }).collect();
+        let bytes = match format {
+            ExportFormat::Prismtx => package::to_prismtx(&docs, deidentified, env!("CARGO_PKG_VERSION"))?,
+            _ => package::to_qdpx(&p.file.name, &docs, env!("CARGO_PKG_VERSION"))?,
+        };
+        std::fs::write(out, bytes)?;
+        return Ok(());
+    }
+    if format.takes_many() {
+        let mut rows = Vec::new();
+        for id in ids {
+            let m = p.media(id)?;
+            let t = p.load_transcript(id)?.ok_or_else(|| EngineError::NoTranscript(m.fields.label.clone()))?;
+            rows.extend(formats::rows(&m.fields.label, &t, opts.clean));
+        }
+        let title = if ids.len() == 1 { p.media(&ids[0])?.fields.label.clone() } else { p.file.name.clone() };
+        match format {
+            ExportFormat::Csv => std::fs::write(out, formats::to_csv(&rows))?,
+            _ => std::fs::write(out, formats::to_xlsx(&rows, &title)?)?,
+        }
+        return Ok(());
+    }
+    export(p, &ids[0], format, out, opts)
 }
 
 pub fn export(p: &Project, id: &str, format: ExportFormat, out: &Path, opts: &prism_transcribe_core::export::ExportOptions) -> Result<()> {
     use prism_transcribe_core::export;
+    use prism_transcribe_core::formats::{self, CaptionOptions};
     let m = p.media(id)?;
     let t = p.load_transcript(id)?.ok_or_else(|| EngineError::NoTranscript(m.fields.label.clone()))?;
     let date = m.fields.date.as_deref();
+    let captions = CaptionOptions { speaker_names: opts.speaker_names, clean: opts.clean };
     match format {
+        ExportFormat::Srt => std::fs::write(out, formats::to_srt(&t, &captions))?,
+        ExportFormat::Vtt => std::fs::write(out, formats::to_vtt(&t, &captions))?,
+        ExportFormat::Csv | ExportFormat::Xlsx | ExportFormat::Prismtx | ExportFormat::Qdpx => return export_files(p, &[id.to_string()], format, out, opts, false),
         ExportFormat::Text => std::fs::write(out, export::to_text(&t, &m.fields.label, date, opts))?,
         ExportFormat::Word => std::fs::write(out, export::to_docx(&t, &m.fields.label, date, &m.fields.label, opts)?)?,
     }

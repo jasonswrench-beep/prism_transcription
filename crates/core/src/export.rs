@@ -26,6 +26,9 @@ pub struct ExportOptions {
     /// default, open decision 10).
     #[serde(default)]
     pub clean: bool,
+    /// Captions only: show who is speaking.
+    #[serde(default)]
+    pub speaker_names: bool,
 }
 
 /// The header line: "INT-07 · 2026-03-04" (the date is the recording's, when the user gave one).

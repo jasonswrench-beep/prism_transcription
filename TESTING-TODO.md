@@ -3,6 +3,35 @@
 Things the build sessions could not check themselves. Newest phase first. When one is done, delete it and note the
 result in the matching results file.
 
+## Phase 5
+
+The build session drove the queue and the export dialog through the real window: three files queued, one moved up
+with its button and one dragged to the top, one held and released, Pause during a transcription and Resume, the app
+killed in the middle of a file and reopened (the queue said it had stopped and Resume finished it), and the summary
+at the end. Every export format was written, Word refused for several files at once, and the three-recording
+`.qdpx` was read by PrismQDA's own importer (`import_qdpx`): 3 transcripts, one timed unit per turn, the recordings
+linked and found, and 8 cases each holding its speaker's turns. The XLSX opened in openpyxl.
+
+- [ ] **The phase's own test: a transcript in PrismQDA with click-to-play.** Export a transcript as a REFI-QDA project
+  (.qdpx), import it in PrismQDA (Project > Import), code a passage and play it from there. Checked only through
+  PrismQDA's importer code, not its window. The .prismtx package waits for PrismQDA's reader (docs/RELEASING.md).
+- [ ] **The installer.** After the release steps (docs/RELEASING.md), install the signed setup on a computer with no
+  development tools, as a normal user: it should install without asking for administrator rights, run, find the
+  speech models (or offer to download them), and the heavy pack should work if whisper-cli went in (`-Whisper`).
+  Then install it through Prism Hub, and update it from one version to the next.
+- [ ] **The Windows notification** when the queue finishes. The build session could not see it (it is outside the
+  window); the in-app summary was seen. In an installed copy the notification shows the app's name and icon.
+- [ ] **Keeping awake.** Start a long queue on a laptop set to sleep after a few minutes, unplugged from mains if
+  allowed: it should not sleep until the queue ends, and sleep normally afterwards.
+- [ ] **Captions in a player.** Load the .srt and .vtt beside the recording in VLC or a browser `<track>`: lines no
+  longer than 42 characters, two lines at most, in time, speaker names where chosen.
+- [ ] **The table in Excel.** Open the .xlsx in Excel: the header frozen, start and end shown as times, the text
+  wrapped, the filter working. Open the .csv too, checking that accented letters come through.
+- [ ] **Screen reader (NVDA) on the queue and the export dialog:** the queue's list, its move, hold and remove
+  buttons, drag and drop by keyboard, and the format choices. The spec's NVDA pass over the whole app belongs here.
+- [ ] **Two files at once on a graphics card** (T8) is not built: the queue runs one file at a time. It waits for a
+  graphics-card build of whisper-cli to be timed (phase 3).
+
 ## Phase 4
 
 The build session drove the whole flow through the real window on the heavy pack's transcript of the two-speaker

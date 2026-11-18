@@ -12,7 +12,7 @@ members = [
 default-members = ["crates/core", "crates/media", "crates/engine", "crates/speech", "crates/bench"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0-alpha.1"
 edition = "2021"
 rust-version = "1.92"
 license = "Apache-2.0"

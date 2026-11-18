@@ -14,6 +14,7 @@ use prism_transcribe_core::speakers;
 use prism_transcribe_core::export::ExportOptions;
 use prism_transcribe_core::model::{Speaker, Transcript, Turn};
 use prism_transcribe_core::project::{ImportFields, MediaCheck, MediaFile, Project};
+use prism_transcribe_core::queue::{Queue, QueueState};
 use prism_transcribe_engine::{self as engine, ExportFormat, Progress, Settings};
 use prism_transcribe_speech::{install, models};
 use serde::Serialize;
@@ -27,6 +28,8 @@ struct AppState {
     project: Mutex<Option<PathBuf>>,
     /// The running transcription or install, if any, and its cancel flag.
     busy: Mutex<Option<(String, Arc<AtomicBool>)>>,
+    /// Whether the batch queue's thread is running.
+    runner: AtomicBool,
 }
 
 type Res<T> = Result<T, String>;
@@ -80,6 +83,15 @@ fn project_new(state: State<AppState>, dir: String, name: String) -> Res<Project
 fn project_open(state: State<AppState>, path: String) -> Res<ProjectView> {
     let p = Project::open(PathBuf::from(&path).as_path()).map_err(err)?;
     *state.project.lock().unwrap() = Some(p.dir.clone());
+    // A queue still marked running was stopped by a crash or by closing the app: it waits for Resume (T8).
+    if !state.runner.load(Ordering::SeqCst) && p.file.queue.state == QueueState::Running {
+        Project::update(&p.dir, |q| {
+            q.file.queue.recover();
+            q.file.queue.rev += 1;
+            Ok(())
+        })
+        .map_err(err)?;
+    }
     view(&p.dir, true)
 }
 
@@ -188,34 +200,68 @@ fn transcript(state: State<AppState>, id: String) -> Res<Option<Transcript>> {
     Project::open(&current(&state)?).map_err(err)?.load_transcript(&id).map_err(err)
 }
 
-/// Export a transcript. With `deidentified`, the export is refused unless the file passes the final check (T6).
+/// Export one transcript, or several into one table or package (T7). The format comes from the file ending. With
+/// `deidentified`, the export is refused unless every file passes the final check (T6).
 #[tauri::command]
-fn export(state: State<AppState>, id: String, path: String, options: ExportOptions, deidentified: bool) -> Res<()> {
-    let out = PathBuf::from(&path);
-    let fmt = ExportFormat::from_path(&out).ok_or("Choose a file ending in .docx or .txt.")?;
-    let p = Project::open(&current(&state)?).map_err(err)?;
-    engine::export_checked(&p, &id, fmt, &out, &options, deidentified).map_err(err)
+async fn export(state: State<'_, AppState>, ids: Vec<String>, path: String, options: ExportOptions, deidentified: bool) -> Res<()> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = PathBuf::from(&path);
+        let fmt = ExportFormat::from_path(&out).ok_or("Choose a file ending in .docx, .txt, .srt, .vtt, .csv, .xlsx, .prismtx or .qdpx.")?;
+        let p = Project::open(&dir).map_err(err)?;
+        engine::export_files(&p, &ids, fmt, &out, &options, deidentified).map_err(err)
+    })
+    .await
+    .map_err(err)?
 }
 
-/// What the export dialog shows before exporting: the file's review status and, when there is a key file, the final
-/// check.
+/// What the export dialog shows before exporting: each file's review status and, when there is a key file, its
+/// final check.
 #[derive(Serialize)]
 struct ExportCheck {
-    deidentified: bool,
     key: engine::deid::KeyState,
+    files: Vec<FileExportCheck>,
+}
+
+#[derive(Serialize)]
+struct FileExportCheck {
+    id: String,
+    label: String,
+    deidentified: bool,
     check: Option<FileCheck>,
 }
 
 #[tauri::command]
-fn export_check(state: State<AppState>, id: String) -> Res<ExportCheck> {
+fn export_check(state: State<AppState>, ids: Vec<String>) -> Res<ExportCheck> {
     let dir = current(&state)?;
     let key = engine::deid::key_state(&dir).map_err(err)?;
-    let check = match key {
-        engine::deid::KeyState::Ready { .. } => Some(engine::deid::check_one(&dir, &id).map_err(err)?),
-        _ => None,
+    let ready = matches!(key, engine::deid::KeyState::Ready { .. });
+    let p = Project::open(&dir).map_err(err)?;
+    let mut files = Vec::new();
+    for id in ids {
+        let check = if ready { Some(engine::deid::check_one(&dir, &id).map_err(err)?) } else { None };
+        let review = p.load_transcript(&id).map_err(err)?.map(|t| t.review).unwrap_or_default();
+        let label = p.media(&id).map(|m| m.fields.label.clone()).unwrap_or_else(|_| id.clone());
+        files.push(FileExportCheck { id, label, deidentified: prism_transcribe_core::deid::is_deidentified(review), check });
+    }
+    Ok(ExportCheck { key, files })
+}
+
+/// Whether PrismQDA and Prism Hub are installed for this user (T7: "Open in PrismQDA", or get it through Hub).
+#[tauri::command]
+fn suite_apps() -> engine::suite::SuiteApps {
+    engine::suite::find()
+}
+
+#[tauri::command]
+fn suite_open(app: String) -> Res<()> {
+    let found = engine::suite::find();
+    let program = match app.as_str() {
+        "prismqda" => found.prismqda.ok_or("PrismQDA is not installed for this user.")?,
+        "hub" => found.hub.ok_or("Prism Hub is not installed for this user.")?,
+        _ => return Err("unknown program".into()),
     };
-    let review = Project::open(&dir).map_err(err)?.load_transcript(&id).map_err(err)?.map(|t| t.review).unwrap_or_default();
-    Ok(ExportCheck { deidentified: prism_transcribe_core::deid::is_deidentified(review), key, check })
+    engine::suite::launch(&program).map_err(err)
 }
 
 /// The light pack's state at the top level (what the first-run panel needs), and the heavy pack's beside it.
@@ -471,6 +517,214 @@ fn hotkeys_default() -> std::collections::BTreeMap<String, String> {
     engine::default_hotkeys()
 }
 
+// ---- The batch queue (T8) ----
+
+#[derive(Clone, Serialize)]
+struct QueueSummary {
+    done: Vec<String>,
+    /// (file label, why)
+    failed: Vec<(String, String)>,
+    seconds: f64,
+}
+
+#[derive(Clone, Serialize)]
+struct QueueEvent {
+    queue: Queue,
+    /// Set once, when the queue has run to its end.
+    summary: Option<QueueSummary>,
+}
+
+fn emit_queue(app: &tauri::AppHandle, dir: &std::path::Path, summary: Option<QueueSummary>) {
+    if let Ok(p) = Project::open(dir) {
+        let _ = app.emit("queue", QueueEvent { queue: p.file.queue, summary });
+    }
+}
+
+/// Change the queue and say so; start its thread when it should run.
+fn queue_change(app: &tauri::AppHandle, state: &State<AppState>, f: impl FnOnce(&mut Queue)) -> Res<Queue> {
+    let dir = current(state)?;
+    let q = Project::update(&dir, |p| {
+        f(&mut p.file.queue);
+        p.file.queue.rev += 1;
+        Ok(p.file.queue.clone())
+    })
+    .map_err(err)?;
+    if q.state == QueueState::Running && q.has_waiting() {
+        run_queue(app.clone(), dir.clone());
+    }
+    emit_queue(app, &dir, None);
+    Ok(q)
+}
+
+/// Stop the running transcription, if it is `id` (or any, with `None`); its checkpoint is kept.
+fn stop_job(state: &State<AppState>, id: Option<&str>) {
+    if let Some((running, flag)) = state.busy.lock().unwrap().as_ref() {
+        if id.is_none_or(|i| i == running) {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
+/// The queue's thread: one file at a time, keeping the computer awake, until nothing waits or the queue is paused
+/// or cancelled. At the end, a Windows notification and an in-app summary naming any file that failed and why.
+fn run_queue(app: tauri::AppHandle, dir: PathBuf) {
+    if app.state::<AppState>().runner.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _awake = engine::power::KeepAwake::new();
+        let started = std::time::Instant::now();
+        let (mut done, mut failed) = (Vec::new(), Vec::new());
+        let label = |id: &str| Project::open(&dir).ok().and_then(|p| p.media(id).ok().map(|m| m.fields.label.clone())).unwrap_or_else(|| id.to_string());
+        loop {
+            let st = app.state::<AppState>();
+            // Claim the job slot and the next file together, so a model install never runs beside a transcription.
+            let cancel = Arc::new(AtomicBool::new(false));
+            let id = {
+                let mut busy = st.busy.lock().unwrap();
+                if busy.is_some() {
+                    break;
+                }
+                match Project::update(&dir, |p| {
+                    let next = p.file.queue.take_next();
+                    p.file.queue.rev += 1;
+                    Ok(next)
+                }) {
+                    Ok(Some(id)) => {
+                        *busy = Some((id.clone(), cancel.clone()));
+                        id
+                    }
+                    _ => break,
+                }
+            };
+            emit_queue(&app, &dir, None);
+            let emit = |e: JobEvent| {
+                let _ = app.emit("job", e);
+            };
+            let r = engine::transcribe(&dir, &id, &Settings::load(), &mut |p| {
+                emit(JobEvent { id: id.clone(), progress: Some(p), finished: false, cancelled: false, error: None });
+                !cancel.load(Ordering::SeqCst)
+            });
+            let cancelled = matches!(r, Err(engine::EngineError::Speech(prism_transcribe_speech::SpeechError::Cancelled)));
+            let error = r.as_ref().err().filter(|_| !cancelled).map(|e| e.to_string());
+            *st.busy.lock().unwrap() = None;
+            let _ = Project::update(&dir, |p| {
+                p.file.queue.finish(&id, error.clone().map_or(Ok(()), Err), cancelled);
+                p.file.queue.rev += 1;
+                Ok(())
+            });
+            match &error {
+                None if !cancelled => done.push(label(&id)),
+                Some(e) => failed.push((label(&id), e.clone())),
+                None => {}
+            }
+            emit(JobEvent { id: id.clone(), progress: None, finished: true, cancelled, error });
+        }
+        app.state::<AppState>().runner.store(false, Ordering::SeqCst);
+        // Run to its end: the queue goes idle and says what happened. Paused or cancelled: it just stops.
+        let q = Project::update(&dir, |p| {
+            let q = &mut p.file.queue;
+            if q.state == QueueState::Running && !q.has_waiting() {
+                q.state = QueueState::Idle;
+            }
+            q.rev += 1;
+            Ok(q.clone())
+        });
+        let finished = matches!(&q, Ok(q) if q.state == QueueState::Idle) && (!done.is_empty() || !failed.is_empty());
+        let summary = finished.then(|| QueueSummary { done: done.clone(), failed: failed.clone(), seconds: started.elapsed().as_secs_f64() });
+        if let Some(s) = &summary {
+            use tauri_plugin_notification::NotificationExt;
+            let body = if s.failed.is_empty() {
+                format!("{} file{} transcribed.", s.done.len(), if s.done.len() == 1 { "" } else { "s" })
+            } else {
+                format!("{} transcribed, {} failed: {}.", s.done.len(), s.failed.len(), s.failed.iter().map(|(l, _)| l.as_str()).collect::<Vec<_>>().join(", "))
+            };
+            let _ = app.notification().builder().title("Prism Transcribe: the queue has finished").body(body).show();
+        }
+        emit_queue(&app, &dir, summary);
+    });
+}
+
+#[tauri::command]
+fn queue_get(state: State<AppState>) -> Res<Queue> {
+    Ok(Project::open(&current(&state)?).map_err(err)?.file.queue)
+}
+
+/// Add files to the end of the queue; with `start`, run it.
+#[tauri::command]
+fn queue_add(app: tauri::AppHandle, state: State<AppState>, ids: Vec<String>, start: bool) -> Res<Queue> {
+    queue_change(&app, &state, |q| {
+        q.add(&ids);
+        if start {
+            q.state = QueueState::Running;
+            q.interrupted = false;
+        }
+    })
+}
+
+/// Run, or resume after Pause or a restart (each file carries on from its last finished chunk).
+#[tauri::command]
+fn queue_start(app: tauri::AppHandle, state: State<AppState>) -> Res<Queue> {
+    queue_change(&app, &state, |q| {
+        q.state = QueueState::Running;
+        q.interrupted = false;
+    })
+}
+
+#[tauri::command]
+fn queue_pause(app: tauri::AppHandle, state: State<AppState>) -> Res<Queue> {
+    let q = queue_change(&app, &state, |q| q.state = QueueState::Paused)?;
+    stop_job(&state, q.running().map(|i| i.id.as_str()));
+    Ok(q)
+}
+
+/// Cancel the whole queue: the running file stops (its checkpoint is kept) and every unfinished file leaves it.
+#[tauri::command]
+fn queue_cancel(app: tauri::AppHandle, state: State<AppState>) -> Res<Queue> {
+    let running = queue_get(state.clone())?.running().map(|i| i.id.clone());
+    if let Some(id) = &running {
+        stop_job(&state, Some(id));
+    }
+    queue_change(&app, &state, |q| q.cancel_all())
+}
+
+/// Hold one file (skip it, keeping its place) or release it. Holding the running file stops it.
+#[tauri::command]
+fn queue_hold(app: tauri::AppHandle, state: State<AppState>, id: String, hold: bool) -> Res<Queue> {
+    let was_running = queue_get(state.clone())?.running().is_some_and(|i| i.id == id);
+    let q = queue_change(&app, &state, |q| {
+        q.hold(&id, hold);
+    })?;
+    if hold && was_running {
+        stop_job(&state, Some(&id));
+    }
+    Ok(q)
+}
+
+#[tauri::command]
+fn queue_remove(app: tauri::AppHandle, state: State<AppState>, id: String) -> Res<Queue> {
+    let was_running = queue_get(state.clone())?.running().is_some_and(|i| i.id == id);
+    if was_running {
+        stop_job(&state, Some(&id));
+    }
+    queue_change(&app, &state, |q| {
+        q.remove(&id);
+    })
+}
+
+/// Move a file to a new place in the queue (drag and drop, or the move buttons).
+#[tauri::command]
+fn queue_move(app: tauri::AppHandle, state: State<AppState>, id: String, to: usize) -> Res<Queue> {
+    queue_change(&app, &state, |q| {
+        q.move_to(&id, to);
+    })
+}
+
+#[tauri::command]
+fn queue_clear(app: tauri::AppHandle, state: State<AppState>) -> Res<Queue> {
+    queue_change(&app, &state, |q| q.clear_finished())
+}
+
 // ---- De-identification (T6) ----
 
 use engine::deid as di;
@@ -632,7 +886,7 @@ fn statement_export(state: State<AppState>, path: String) -> Res<()> {
     let bytes = match ExportFormat::from_path(&out) {
         Some(ExportFormat::Word) => prism_transcribe_core::export::blocks_to_docx("Data handling statement", &blocks).map_err(err)?,
         Some(ExportFormat::Text) => prism_transcribe_core::export::blocks_to_text(&blocks).into_bytes(),
-        None => return Err("Choose a file ending in .docx or .txt.".into()),
+        _ => return Err("Choose a file ending in .docx or .txt.".into()),
     };
     std::fs::write(&out, bytes).map_err(err)
 }
@@ -647,6 +901,7 @@ fn statement_text(state: State<AppState>) -> Res<String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::default())
         .register_uri_scheme_protocol("media", |ctx, request| {
             let reply = (|| {
@@ -715,7 +970,18 @@ fn main() {
             project_unlock,
             project_lock,
             statement_export,
-            statement_text
+            statement_text,
+            queue_get,
+            queue_add,
+            queue_start,
+            queue_pause,
+            queue_cancel,
+            queue_hold,
+            queue_remove,
+            queue_move,
+            queue_clear,
+            suite_apps,
+            suite_open
         ])
         .run(tauri::generate_context!())
         .expect("Prism Transcribe could not start");

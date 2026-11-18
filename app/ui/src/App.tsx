@@ -21,8 +21,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   api,
   on,
-  type ExportCheck,
-  type ExportOptions,
+  type SuiteApps,
   type ImportEvent,
   type ImportFields,
   type InstallEvent,
@@ -31,6 +30,9 @@ import {
   type ModelStatus,
   type Progress,
   type ProjectView,
+  type Queue,
+  type QueueEvent,
+  type QueueSummary,
   type Settings,
   type Transcript,
   type TrackMode,
@@ -39,6 +41,8 @@ import { duration, hms, LOW_CONFIDENCE, progressText } from './format';
 import { Editor } from './editor/Editor';
 import { DeidView } from './deid';
 import { PrivacyDialog, UnlockPanel } from './privacy';
+import { QueuePanel } from './queue';
+import { ExportDialog } from './export';
 
 const MEDIA_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'mov', 'mkv', 'avi', 'webm'];
 const STATUS_WORDS: Record<MediaFile['status'], string> = {
@@ -66,10 +70,16 @@ export function App() {
   const [newProject, setNewProject] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<{ file: MediaFile; transcript: Transcript } | null>(null);
-  const [exporting, setExporting] = useState<MediaFile | null>(null);
+  const [exporting, setExporting] = useState<MediaFile[] | null>(null);
+  // After a PrismQDA or REFI-QDA export: open PrismQDA, or Prism Hub to install it (T7).
+  const [handoff, setHandoff] = useState<SuiteApps | null>(null);
   const [details, setDetails] = useState<MediaFile | null>(null);
   const [deid, setDeid] = useState(false);
   const [privacy, setPrivacy] = useState(false);
+  const [queue, setQueue] = useState<Queue>({ state: 'idle', items: [] });
+  const [summary, setSummary] = useState<QueueSummary | null>(null);
+  // Command replies and events can arrive out of order: keep the newest queue.
+  const takeQueue = useCallback((q: Queue) => setQueue((cur) => ((q.rev ?? 0) >= (cur.rev ?? 0) ? q : cur)), []);
 
   const refresh = useCallback(async () => {
     try {
@@ -94,6 +104,14 @@ export function App() {
           if (!e.cancelled && !e.error) api.transcript(e.id).then((t) => { setSelected(e.id); setTranscript(t); });
         } else {
           setJob({ id: e.id, progress: e.progress });
+        }
+      }),
+      on<QueueEvent>('queue', (e) => {
+        takeQueue(e.queue);
+        if (e.summary) {
+          setSummary(e.summary);
+          const s = e.summary;
+          setNotice(`The queue has finished: ${s.done.length} transcribed${s.failed.length ? `, ${s.failed.length} failed (${s.failed.map(([l]) => l).join(', ')})` : ''}.`);
         }
       }),
       on<ImportEvent>('import', (e) => {
@@ -145,30 +163,22 @@ export function App() {
     if (t) setEditing({ file: f, transcript: t });
   };
 
-  const exportAs = async (f: MediaFile, kind: 'docx' | 'txt', options: ExportOptions, deidentified: boolean) => {
-    const path = await save({
-      title: kind === 'docx' ? 'Export to Word' : 'Export to plain text',
-      defaultPath: `${f.label}.${kind}`,
-      filters: [{ name: kind === 'docx' ? 'Word document' : 'Plain text', extensions: [kind] }],
-    });
-    if (!path) return;
+  // Every transcription goes through the queue (T8): Transcribe adds the file and runs the queue.
+  const transcribe = async (f: MediaFile) => {
     try {
-      await api.exportFile(f.id, path, options, deidentified);
-      setNotice(`Exported ${f.label} to ${path}${deidentified ? ', checked: no name from the list is in it' : ''}.`);
+      takeQueue(await api.queueAdd([f.id], true));
     } catch (e) {
       setNotice(message(e));
     }
   };
 
-  const transcribe = async (f: MediaFile) => {
-    try {
-      setJob({ id: f.id, progress: null });
-      await api.transcribe(f.id);
-    } catch (e) {
-      setJob(null);
-      setNotice(message(e));
-    }
-  };
+  useEffect(() => {
+    if (!project || project.locked) return;
+    // A different project's queue replaces this one whatever its revision.
+    api.queue().then(setQueue).catch(() => {});
+  }, [project?.dir, project?.locked]);
+  const queued = (id: string) => queue.items.some((i) => i.id === id && (i.state === 'waiting' || i.state === 'running' || i.state === 'held'));
+  const notQueued = project?.files.filter((f) => f.status !== 'transcribed' && f.status !== 'failed' && !queued(f.id)) ?? [];
 
   const current = project?.files.find((f) => f.id === selected) ?? null;
 
@@ -194,6 +204,23 @@ export function App() {
         <div className="notice" role="status">
           <span>{notice}</span>
           <Button className="quiet" onPress={() => setNotice(null)} aria-label="Dismiss the message">
+            Dismiss
+          </Button>
+        </div>
+      )}
+
+      {handoff && (
+        <div className="notice handoff" role="status">
+          <span>
+            {handoff.prismqda
+              ? 'In PrismQDA, import the .qdpx project: its recordings play from each turn. PrismQDA will read .prismtx once its reader is built.'
+              : handoff.hub
+                ? 'PrismQDA is not installed. Prism Hub installs it.'
+                : 'PrismQDA is not installed. Install it through Prism Hub.'}
+          </span>
+          {handoff.prismqda && <Button onPress={() => api.suiteOpen('prismqda').catch((e) => setNotice(message(e)))}>Open PrismQDA</Button>}
+          {!handoff.prismqda && handoff.hub && <Button onPress={() => api.suiteOpen('hub').catch((e) => setNotice(message(e)))}>Open Prism Hub</Button>}
+          <Button className="quiet" onPress={() => setHandoff(null)} aria-label="Dismiss the PrismQDA message">
             Dismiss
           </Button>
         </div>
@@ -241,8 +268,19 @@ export function App() {
           <section className="files" aria-labelledby="files-heading">
             <div className="section-head">
               <h2 id="files-heading">Recordings</h2>
-              <Button onPress={startImport}>Import…</Button>
+              <div className="row">
+                {notQueued.length > 1 && (
+                  <Button onPress={async () => takeQueue(await api.queueAdd(notQueued.map((f) => f.id), queue.state === 'running'))}>
+                    Queue all {notQueued.length} untranscribed
+                  </Button>
+                )}
+                {project.files.filter((f) => f.status === 'transcribed').length > 1 && (
+                  <Button onPress={() => setExporting(project.files.filter((f) => f.status === 'transcribed'))}>Export all…</Button>
+                )}
+                <Button onPress={startImport}>Import…</Button>
+              </div>
             </div>
+            <QueuePanel queue={queue} files={project.files} summary={summary} onQueue={takeQueue} onNotice={setNotice} onDismissSummary={() => setSummary(null)} />
             {importing > 0 && <p className="hint" role="status">Importing {importing} file{importing === 1 ? '' : 's'}…</p>}
             {project.files.length === 0 ? (
               <p className="hint">No recordings yet. Import one to begin.</p>
@@ -255,11 +293,13 @@ export function App() {
                     selected={f.id === selected}
                     job={job?.id === f.id ? job : null}
                     busy={job !== null}
+                    queued={queued(f.id)}
+                    queueRunning={queue.state === 'running'}
                     modelsReady={!!models?.installed}
                     onSelect={() => setSelected(f.id)}
                     onTranscribe={() => transcribe(f)}
                     onCancel={() => api.cancel()}
-                    onExport={() => setExporting(f)}
+                    onExport={() => setExporting([f])}
                     onEdit={() => openEditor(f)}
                     onDetails={() => setDetails(f)}
                   />
@@ -337,12 +377,12 @@ export function App() {
         }}
       />
       <ExportDialog
-        file={exporting}
+        files={exporting}
+        projectName={project?.name ?? 'Transcripts'}
         onClose={() => setExporting(null)}
-        onExport={(kind, opts, deidentified) => {
-          const f = exporting!;
-          setExporting(null);
-          exportAs(f, kind, opts, deidentified);
+        onNotice={setNotice}
+        onExported={(kind) => {
+          if (kind === 'prismtx' || kind === 'qdpx') api.suiteApps().then(setHandoff);
         }}
       />
       {project && (
@@ -387,6 +427,8 @@ function FileRow(props: {
   modelsReady: boolean;
   onSelect: () => void;
   onTranscribe: () => void;
+  queued: boolean;
+  queueRunning: boolean;
   onCancel: () => void;
   onExport: () => void;
   onEdit: () => void;
@@ -428,8 +470,8 @@ function FileRow(props: {
               Edit
             </Button>
           )}
-          <Button className={done ? undefined : 'primary'} isDisabled={props.busy || !props.modelsReady || f.status === 'failed'} onPress={props.onTranscribe}>
-            {done ? 'Transcribe again' : 'Transcribe'}
+          <Button className={done ? undefined : 'primary'} isDisabled={props.queued || !props.modelsReady || f.status === 'failed'} onPress={props.onTranscribe}>
+            {props.queued ? 'In the queue' : props.queueRunning ? 'Add to the queue' : done ? 'Transcribe again' : 'Transcribe'}
           </Button>
           <Button isDisabled={!done} onPress={props.onExport}>Export…</Button>
           <Button isDisabled={props.busy} onPress={props.onDetails} aria-label={`Details of ${f.label}`}>
@@ -844,97 +886,5 @@ function HeavyPack(props: {
         )}
       </div>
     </section>
-  );
-}
-
-function ExportDialog(props: { file: MediaFile | null; onClose: () => void; onExport: (kind: 'docx' | 'txt', o: ExportOptions, deidentified: boolean) => void }) {
-  const [kind, setKind] = useState<'docx' | 'txt'>('docx');
-  const [stamps, setStamps] = useState('per_turn');
-  const [clean, setClean] = useState(false);
-  const [lines, setLines] = useState(false);
-  const [check, setCheck] = useState<ExportCheck | null>(null);
-  const [deid, setDeid] = useState(false);
-  useEffect(() => {
-    setCheck(null);
-    if (!props.file) return;
-    api
-      .exportCheck(props.file.id)
-      .then((c) => {
-        setCheck(c);
-        setDeid(c.deidentified && c.key.state === 'ready');
-      })
-      .catch(() => setCheck(null));
-  }, [props.file]);
-  const keyReady = check?.key.state === 'ready';
-  const left = check?.check?.leftovers ?? [];
-  return (
-    <ModalOverlay isOpen={!!props.file} onOpenChange={(o) => !o && props.onClose()} isDismissable>
-      <Modal>
-        <Dialog>
-          <Heading slot="title">Export {props.file?.label}</Heading>
-          <RadioGroup value={kind} onChange={(v) => setKind(v as 'docx' | 'txt')}>
-            <Label>Format</Label>
-            <Radio value="docx">Word (.docx)</Radio>
-            <Radio value="txt">Plain text (.txt)</Radio>
-          </RadioGroup>
-          <RadioGroup value={stamps} onChange={setStamps}>
-            <Label>Timestamps</Label>
-            <Radio value="per_turn">At the start of every turn</Radio>
-            <Radio value="every">Every 30 seconds</Radio>
-            <Radio value="none">None</Radio>
-          </RadioGroup>
-          <RadioGroup value={clean ? 'clean' : 'verbatim'} onChange={(v) => setClean(v === 'clean')}>
-            <Label>Text</Label>
-            <Radio value="verbatim">Verbatim: every word as said</Radio>
-            <Radio value="clean">Clean: fillers and repeated words left out</Radio>
-          </RadioGroup>
-          {kind === 'docx' && (
-            <Checkbox isSelected={lines} onChange={setLines}>
-              <span className="box" aria-hidden="true" /> Number the lines
-            </Checkbox>
-          )}
-          <Checkbox isSelected={deid} onChange={setDeid} isDisabled={!keyReady}>
-            <span className="box" aria-hidden="true" /> De-identified: check that no name from the list is in it
-          </Checkbox>
-          {check && !keyReady && <p className="hint">There is no key file for this project yet, so there is no name list to check against. Start in De-identify.</p>}
-          {check && !check.deidentified && (
-            <p className="warning" role="alert">
-              {props.file?.label} has not been marked de-identified. This export may contain real names.
-            </p>
-          )}
-          {deid && left.length > 0 && (
-            <p className="warning" role="alert">
-              {left.length} name{left.length === 1 ? '' : 's'} from the list {left.length === 1 ? 'is' : 'are'} still in {props.file?.label} (
-              {left
-                .slice(0, 5)
-                .map((l) => `${l.text}, ${l.place}`)
-                .join('; ')}
-              {left.length > 5 ? '…' : ''}). The de-identified export will be refused until they are replaced.
-            </p>
-          )}
-          {deid && keyReady && left.length === 0 && check?.check && <p className="hint">Passes the final check: no name from the list.</p>}
-          <div className="row end">
-            <Button onPress={props.onClose}>Cancel</Button>
-            <Button
-              className="primary"
-              isDisabled={deid && left.length > 0}
-              onPress={() =>
-                props.onExport(
-                  kind,
-                  {
-                    timestamps: stamps === 'every' ? { mode: 'every', seconds: 30 } : stamps === 'none' ? { mode: 'none' } : { mode: 'per_turn' },
-                    line_numbers: kind === 'docx' && lines,
-                    clean,
-                  },
-                  deid,
-                )
-              }
-            >
-              Choose where to save…
-            </Button>
-          </div>
-        </Dialog>
-      </Modal>
-    </ModalOverlay>
   );
 }

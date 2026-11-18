@@ -7,8 +7,10 @@
 //!   prism-transcribe-cli import <project> <recording> [--label L] [--date D] [--speakers N] [--language xx] [--copy]
 //!                        [--pack light-1|heavy-1] [--tracks mixed|tracks|channels]
 //!   prism-transcribe-cli transcribe <project> <id>
-//!   prism-transcribe-cli export <project> <id> <out.docx|out.txt> [--timestamps turn|none|<seconds>] [--line-numbers] [--clean]
+//!   prism-transcribe-cli export <project> <id>[,<id>...] <out.docx|.txt|.srt|.vtt|.csv|.xlsx|.prismtx|.qdpx>
+//!                        [--timestamps turn|none|<seconds>] [--line-numbers] [--clean] [--speaker-names] (captions)
 //!                        [--deidentified]   (refused unless no name from the key file's list is left)
+//!                        Several ids (or "all") go into one table, .prismtx or .qdpx.
 //!   prism-transcribe-cli check <project>   the final check (T6): names from the list left in each file
 //!   prism-transcribe-cli statement <project> <out.docx|out.txt>   the data handling statement
 //!   A password-protected project asks for its password on standard input.
@@ -42,7 +44,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1).peekable();
     while let Some(x) = it.next() {
         if let Some(k) = x.strip_prefix("--") {
-            if matches!(k, "copy" | "line-numbers" | "clean" | "quick" | "deidentified") {
+            if matches!(k, "copy" | "line-numbers" | "clean" | "quick" | "deidentified" | "speaker-names") {
                 a.flags.push(k.into());
             } else {
                 a.opts.insert(k.into(), it.next().unwrap_or_else(|| usage()));
@@ -103,7 +105,7 @@ fn export_opts(a: &Args) -> ExportOptions {
         Some("none") => Timestamps::None,
         Some(n) => Timestamps::Every { seconds: n.parse().unwrap_or_else(|_| usage()) },
     };
-    ExportOptions { timestamps, line_numbers: a.flags.iter().any(|f| f == "line-numbers"), clean: a.flags.iter().any(|f| f == "clean") }
+    ExportOptions { timestamps, line_numbers: a.flags.iter().any(|f| f == "line-numbers"), clean: a.flags.iter().any(|f| f == "clean"), speaker_names: a.flags.iter().any(|f| f == "speaker-names") }
 }
 
 fn main() {
@@ -188,9 +190,14 @@ fn main() {
             let (proj, id, out) = (a.pos.get(1).unwrap_or_else(|| usage()), a.pos.get(2).unwrap_or_else(|| usage()), a.pos.get(3).unwrap_or_else(|| usage()));
             unlock(proj);
             let p = Project::open(proj.as_ref()).unwrap_or_else(|e| die(e));
-            let fmt = ExportFormat::from_path(out.as_ref()).unwrap_or_else(|| die("the output must end in .docx or .txt"));
+            let fmt = ExportFormat::from_path(out.as_ref()).unwrap_or_else(|| die("the output must end in .docx, .txt, .srt, .vtt, .csv, .xlsx, .prismtx or .qdpx"));
             let deid = a.flags.iter().any(|f| f == "deidentified");
-            engine::export_checked(&p, id, fmt, out.as_ref(), &export_opts(&a), deid).unwrap_or_else(|e| die(e));
+            let ids: Vec<String> = if id == "all" {
+                p.file.files.iter().filter(|m| p.load_transcript(&m.id).ok().flatten().is_some()).map(|m| m.id.clone()).collect()
+            } else {
+                id.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+            engine::export_files(&p, &ids, fmt, out.as_ref(), &export_opts(&a), deid).unwrap_or_else(|e| die(e));
             println!("Wrote {out}{}", if deid { " (checked: no name from the list)" } else { "" });
         }
         Some("check") => {
@@ -217,7 +224,7 @@ fn main() {
             let bytes = match ExportFormat::from_path(out.as_ref()) {
                 Some(ExportFormat::Word) => prism_transcribe_core::export::blocks_to_docx("Data handling statement", &blocks).unwrap_or_else(|e| die(e)),
                 Some(ExportFormat::Text) => prism_transcribe_core::export::blocks_to_text(&blocks).into_bytes(),
-                None => die("the output must end in .docx or .txt"),
+                _ => die("the output must end in .docx or .txt"),
             };
             std::fs::write(out, bytes).unwrap_or_else(|e| die(e));
             println!("Wrote {out}");
