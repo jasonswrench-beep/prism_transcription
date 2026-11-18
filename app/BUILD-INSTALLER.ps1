@@ -15,7 +15,8 @@
 # go into the installer's "whisper" folder, where the app looks first, so the heavy pack works without setup. Without
 # it, the installer has no whisper-cli and Settings asks for one when the heavy pack is used.
 #
-# -Sign uses the suite's signing scripts rather than a copy of them. OPENSTAGE_SIGN_TOOLS names the folder that holds
+# -Sign uses the suite's signing scripts, copied fresh into this build's work folder each time so that two builds signing
+# at once never share their settings file. OPENSTAGE_SIGN_TOOLS names the folder that holds
 # sign_windows.py and check_signatures.py (as in the PrismQDA and OpenStage repositories); their header says which
 # settings and sign-in they need (OPENSTAGE_SIGN_* and az login). Tauri is given sign_windows.py as its signCommand
 # through a temporary configuration, so no signing setting goes into tauri.conf.json or the repository. whisper-cli and
@@ -72,8 +73,14 @@ if ($Sign) {
     }
     if (-not $python) { throw 'python was not found, and signing needs it' }
     if (-not $env:OPENSTAGE_SIGN_PUBLISHER) { throw 'OPENSTAGE_SIGN_PUBLISHER is not set: it names the signer the build must see on every file' }
+    # The suite's scripts write their settings file (metadata.json) beside the repository they sit in, so two builds
+    # signing at once through the same folder overwrite each other's file and one fails. This build runs a copy taken
+    # from that folder now, in its own work folder: the scripts are still the suite's, the settings still the user's.
+    $signTools = Join-Path $root 'target\installer-work\sign\tools'
+    New-Item -ItemType Directory -Force $signTools | Out-Null
+    Copy-Item (Join-Path $tools 'sign_windows.py'), (Join-Path $tools 'check_signatures.py') $signTools -Force
     if (-not $dryRun) {
-        & $python (Join-Path $tools 'sign_windows.py') --ready
+        & $python (Join-Path $signTools 'sign_windows.py') --ready
         if ($LASTEXITCODE) { throw 'signing cannot start: see what is missing above' }
     }
 }
@@ -109,17 +116,25 @@ $work = Join-Path $root 'target\installer-work'
 New-Item -ItemType Directory -Force $work | Out-Null
 $config = @{ bundle = @{ windows = @{} } }
 if ($Sign) {
-    $config.bundle.windows.signCommand = @{ cmd = $python; args = @((Join-Path $env:OPENSTAGE_SIGN_TOOLS 'sign_windows.py'), '--description', 'Prism Transcribe', '%1') }
+    $config.bundle.windows.signCommand = @{ cmd = $python; args = @((Join-Path $signTools 'sign_windows.py'), '--description', 'Prism Transcribe', '%1') }
 }
 if ($Whisper) {
     if (-not (Test-Path (Join-Path $Whisper 'whisper-cli.exe'))) { throw "$Whisper has no whisper-cli.exe" }
     $stage = Join-Path $work 'whisper'
-    if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-    New-Item -ItemType Directory -Force $stage | Out-Null
-    Copy-Item (Join-Path $Whisper '*.exe'), (Join-Path $Whisper '*.dll') $stage
+    # The staged copies are kept, signed, while the files they came from are unchanged (names and SHA-256 in
+    # whisper.source.txt), so a second build does not sign them all again; files already signed are left as they are.
+    $stamp = (Get-ChildItem (Join-Path $Whisper '*') -Include '*.exe', '*.dll' | Sort-Object Name | ForEach-Object { "$($_.Name) $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)" }) -join "`n"
+    $stampFile = Join-Path $work 'whisper.source.txt'
+    $same = (Test-Path $stage) -and (Test-Path $stampFile) -and ((Get-Content $stampFile -Raw).Trim() -eq $stamp.Trim())
+    if (-not $same) {
+        if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+        New-Item -ItemType Directory -Force $stage | Out-Null
+        Copy-Item (Join-Path $Whisper '*.exe'), (Join-Path $Whisper '*.dll') $stage
+        [System.IO.File]::WriteAllText($stampFile, $stamp)
+    }
     if ($Sign -and -not $dryRun) {
         foreach ($f in Get-ChildItem $stage -File) {
-            & $python (Join-Path $env:OPENSTAGE_SIGN_TOOLS 'sign_windows.py') --description 'whisper.cpp (for Prism Transcribe)' $f.FullName
+            & $python (Join-Path $signTools 'sign_windows.py') --description 'whisper.cpp (for Prism Transcribe)' $f.FullName
             if ($LASTEXITCODE) { throw "could not sign $($f.Name)" }
         }
     }
@@ -141,7 +156,7 @@ if ($LASTEXITCODE) { throw 'the app did not build' }
 
 $installer = Get-ChildItem (Join-Path $root 'target\release\bundle\nsis') -Filter '*-setup.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($Sign -and -not $dryRun) {
-    & $python (Join-Path $env:OPENSTAGE_SIGN_TOOLS 'check_signatures.py') $installer.FullName
+    & $python (Join-Path $signTools 'check_signatures.py') $installer.FullName
     if ($LASTEXITCODE) { throw 'the setup was built, but it is not signed as it should be (see above)' }
 }
 $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
