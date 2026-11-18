@@ -22,7 +22,7 @@ pub const ENDPOINT: &str = "https://github.com/jasonswrench-beep/prism_transcrip
 
 /// The public half of the update-signing key (the text of the `.pub` file `tools/make-update-key.ps1` makes). **Empty until that is done**,
 /// and then the updater is "not set up": it cannot connect to anything.
-pub const PUBKEY: &str = "";
+pub const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDREQjJEREZDNkY1QTYyNzkKUldSNVlscHYvTjJ5VFN5OGJOVTJBZndNYXptTmpRbVZ2QnFHNnkyM3VURExzSXgxems2WWdNcWkK";
 
 #[derive(Clone, Debug)]
 pub struct Feed {

@@ -77,7 +77,9 @@ SHA-256 `cf695b844d0e642ac59072eecd5709c5458e19ab282e2df43a1c1991c8a2c797`). **S
 ## Updates (from the next release)
 
 8. **The update key, once:** `tools\make-update-key.ps1` (it asks Jason for a password and puts the public half in
-   `app\src-tauri\src\updates.rs`; commit that). Back up the key folder and the password.
+   `app\src-tauri\src\updates.rs`; commit that). Back up the key folder and the password. **Done 2026-11-18:** minisign
+   key `4DB2DDFC6F5A6279`, its public half in `updates.rs`; the private key is in `PrismTranscribe-update-key` in
+   Jason's profile folder, outside the repository. Programs built from this commit on accept only updates it signed.
 9. **Each release:** build with `-Updates -NotesFile <notes.txt>` as well, publish the release, then upload
    `target\release-assets\latest.json` to the `update-feed` release (a pre-release made once, titled "Update feed: not a
    download"). The steps are in [UPDATES.md](UPDATES.md). 0.1.0-alpha.1 has no key built in, so its Check for updates
