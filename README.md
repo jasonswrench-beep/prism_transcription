@@ -4,7 +4,7 @@ Prism Transcribe turns interview and focus-group recordings into speaker-labelle
 researcher's own Windows computer, and sends them to PrismQDA. Nothing leaves the machine: the audio, the transcript
 and every file in between stay local, and the speech models run on the computer itself.
 
-**Status: phase 5 (hand-off and release), version 0.1.0-alpha.1, not yet released.** The app creates or opens a
+**Status: 0.1.0-alpha.1, the first preview ([release](https://github.com/jasonswrench-beep/prism_transcription/releases/tag/v0.1.0-alpha.1)): signed, for testing, not yet in Prism Hub.** The app creates or opens a
 project, imports recordings, installs and checks its speech models (or imports them from an offline zip), transcribes
 them through a batch queue, and opens each transcript in an editor:
 - **Panes:** the transcript beside the recording, with its picture when it has one, a waveform and a whole-file overview with a colour band per speaker.
@@ -20,8 +20,8 @@ them through a batch queue, and opens each transcript in an editor:
 - **De-identification:** a name list per project, typed or pasted from a roster, with consistent replacements (P07, [Participant 3], [City]) applied across every transcript, ignoring case and keeping possessives ("Maria's" becomes "P07's"). A pass flags email addresses, phone numbers, street addresses and postcodes, dates, birth details, ID-like numbers and web addresses, written or spoken. Another lists capitalised words that may be names, using Windows' own dictionary and a project word list. Every change is logged (original, replacement, file, time in the recording, when, who) in a key file kept apart from the transcripts and never exported, and a final check refuses a de-identified export while any name on the list is left.
 - **Privacy:** optional password protection of the transcripts and the key file (Argon2id and XChaCha20-Poly1305, from RustCrypto), the Offline switch, and a one-page data handling statement for ethics protocols, written from the project's actual set-up.
 
-Edited words keep their times (T5). The installer is set up (`app\BUILD-INSTALLER.ps1`, signed by the suite's
-signing scripts) but not built: the release steps, and what waits on a decision, are in
+Edited words keep their times (T5). The installer is built and signed by `app\BUILD-INSTALLER.ps1` from a tagged
+commit; the release steps, and what is left (the Prism Hub entry and PrismQDA's reader item), are in
 [docs/RELEASING.md](docs/RELEASING.md). The plan is in the
 specification (six phases, requirements T1 to T8); phase 0's measurements are in
 [docs/PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md). What only a person can check is in
