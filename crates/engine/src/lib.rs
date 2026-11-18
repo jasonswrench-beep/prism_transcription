@@ -11,6 +11,10 @@ use prism_transcribe_speech::{install, pipeline, wav, whisper, SpeechError, Spee
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+pub mod deid;
+pub mod spell;
+pub mod statement;
+
 pub use job::Progress;
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +33,10 @@ pub enum EngineError {
     ModelsMissing(String),
     #[error("{0} has not been transcribed yet")]
     NoTranscript(String),
+    #[error("key file: {0}")]
+    Key(String),
+    #[error("{0}")]
+    NotDeidentified(String),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -57,6 +65,10 @@ pub struct Settings {
     /// Seconds played again when playback resumes after a pause (T4, default 1.5).
     #[serde(default)]
     pub rewind_on_resume: Option<f64>,
+    /// Where each project's key file is (T6), by project id. Kept here rather than in the project folder, so the
+    /// project folder does not point at the real names.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub key_files: std::collections::BTreeMap<String, PathBuf>,
 }
 
 /// The editor's default keys (T4): foot-pedal style F-keys, Ctrl+T for a timestamp, Alt+1 to Alt+9 for speakers. Key names are the browser's
@@ -281,6 +293,10 @@ fn recognizer(pack: &ModelPack, settings: &Settings, model_dir: &Path, work: &Pa
 /// each a known speaker, with no diarization. The job resumes from its checkpoint after a cancel or a crash.
 /// Temporary audio is deleted when the job ends.
 pub fn transcribe(dir: &Path, id: &str, settings: &Settings, progress: &mut dyn FnMut(Progress) -> bool) -> Result<Transcript> {
+    // A locked project could not save the result; say so before the long work, not after.
+    if !Project::open(dir)?.is_unlocked() {
+        return Err(ProjectError::Locked.into());
+    }
     let model_dir = settings.model_dir();
     let m0 = Project::open(dir)?.media(id)?.clone();
     let pack = choose_pack(&m0.fields);
@@ -428,6 +444,26 @@ impl ExportFormat {
             _ => None,
         }
     }
+}
+
+/// Export, and when `deidentified` is asked for, refuse unless the file passes the final check against the key
+/// file's name list (T6): no name on the list anywhere in what the export carries.
+pub fn export_checked(p: &Project, id: &str, format: ExportFormat, out: &Path, opts: &prism_transcribe_core::export::ExportOptions, deidentified: bool) -> Result<()> {
+    if deidentified {
+        let c = deid::check_one(&p.dir, id)?;
+        if !c.passes() {
+            let mut list: Vec<String> = c.leftovers.iter().map(|l| format!("{} ({})", l.text, l.place)).collect();
+            list.dedup();
+            let more = if list.len() > 5 { format!(" and {} more", list.len() - 5) } else { String::new() };
+            list.truncate(5);
+            return Err(EngineError::NotDeidentified(format!(
+                "{} still has names from the list: {}{more}. Replace them in De-identify, or export without the de-identified mark.",
+                c.label,
+                list.join(", ")
+            )));
+        }
+    }
+    export(p, id, format, out, opts)
 }
 
 pub fn export(p: &Project, id: &str, format: ExportFormat, out: &Path, opts: &prism_transcribe_core::export::ExportOptions) -> Result<()> {

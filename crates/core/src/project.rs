@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! <folder>/project.prismtranscribe   the project file (JSON)
-//! <folder>/transcripts/<id>.json     one transcript per media file
+//! <folder>/transcripts/<id>.json     one transcript per media file (<id>.locked when password protected)
 //! <folder>/media/                    copies of recordings, only when "Copy media into project" is chosen
 //! <folder>/temp/                     16 kHz copies, job checkpoints; emptied when jobs end ("Clean up")
 //! <folder>/cache/                    waveform peaks and playback copies; can always be rebuilt
@@ -11,6 +11,7 @@
 //! By default the project links to the original recordings (open decision 6). The original is never modified; its
 //! SHA-256 is stored at import and checked when the project opens.
 
+use crate::crypt::{self, CryptError, Lock};
 use crate::model::{ModelError, Transcript};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -37,6 +38,10 @@ pub enum ProjectError {
     NoSuchMedia(String),
     #[error("a project already exists in {0}")]
     Exists(String),
+    #[error("this project is password protected; unlock it with its password first")]
+    Locked,
+    #[error("{0}")]
+    Crypt(#[from] CryptError),
 }
 
 pub type Result<T> = std::result::Result<T, ProjectError>;
@@ -133,12 +138,30 @@ pub fn default_notation() -> Vec<String> {
 pub struct ProjectFile {
     pub format: String,
     pub schema_version: u32,
+    /// A random id, so a key file (T6) can tell which project it belongs to. Given on create, or on the first open
+    /// of a project made before phase 4.
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub created: String,
     #[serde(default)]
     pub files: Vec<MediaFile>,
     #[serde(default = "default_notation")]
     pub notation: Vec<String>,
+    /// The project word list (T4, T6): pseudonyms, field terms and words the suggestions pass was told are not
+    /// names. Never suggested as names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub word_list: Vec<String>,
+    /// Set when the transcripts are password protected (open decision 7); see [`crate::crypt`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock: Option<Lock>,
+}
+
+/// A new random project id (hex).
+pub fn new_id() -> String {
+    let mut b = [0u8; 8];
+    getrandom::getrandom(&mut b).expect("the operating system's random number source");
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// What opening a project found about one recording.
@@ -160,6 +183,11 @@ pub fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// Today's date on this computer's clock, for documents a person reads (YYYY-MM-DD).
+pub fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
 /// Write a file so that a crash leaves either the old or the new contents, never half of one.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension(format!("{}.saving", path.extension().and_then(|e| e.to_str()).unwrap_or("tmp")));
@@ -170,6 +198,13 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
         f.sync_all()?;
     }
     std::fs::rename(&tmp, path)
+}
+
+fn remove_if_there(p: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(p) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 pub fn sha256_file(path: &Path) -> std::io::Result<(String, u64)> {
@@ -197,7 +232,17 @@ impl Project {
         std::fs::create_dir_all(dir.join("temp"))?;
         let p = Project {
             dir: dir.to_path_buf(),
-            file: ProjectFile { format: PROJECT_FORMAT.into(), schema_version: PROJECT_SCHEMA_VERSION, name: name.into(), created: now(), files: Vec::new(), notation: default_notation() },
+            file: ProjectFile {
+                format: PROJECT_FORMAT.into(),
+                schema_version: PROJECT_SCHEMA_VERSION,
+                id: new_id(),
+                name: name.into(),
+                created: now(),
+                files: Vec::new(),
+                notation: default_notation(),
+                word_list: Vec::new(),
+                lock: None,
+            },
         };
         p.save()?;
         Ok(p)
@@ -205,6 +250,20 @@ impl Project {
 
     /// Open a project from its folder or its project file.
     pub fn open(path: &Path) -> Result<Self> {
+        let p = Project::open_file(path)?;
+        if p.file.id.is_empty() {
+            // A project from before phase 4: give it its id once, under the lock that guards the project file.
+            return Project::update(&p.dir, |q| {
+                if q.file.id.is_empty() {
+                    q.file.id = new_id();
+                }
+                Ok(Project { dir: q.dir.clone(), file: q.file.clone() })
+            });
+        }
+        Ok(p)
+    }
+
+    fn open_file(path: &Path) -> Result<Self> {
         let (dir, file) = if path.is_dir() { (path.to_path_buf(), path.join(PROJECT_FILE)) } else { (path.parent().unwrap_or(Path::new(".")).to_path_buf(), path.to_path_buf()) };
         let text = std::fs::read_to_string(&file)?;
         let v: serde_json::Value = serde_json::from_str(&text)?;
@@ -299,21 +358,103 @@ impl Project {
             .collect()
     }
 
+    /// The plain transcript file.
     pub fn transcript_path(&self, id: &str) -> PathBuf {
         self.dir.join("transcripts").join(format!("{id}.json"))
     }
 
-    pub fn load_transcript(&self, id: &str) -> Result<Option<Transcript>> {
-        let p = self.transcript_path(id);
-        if !p.exists() {
-            return Ok(None);
+    /// The sealed transcript file, when the project is password protected.
+    pub fn locked_path(&self, id: &str) -> PathBuf {
+        self.dir.join("transcripts").join(format!("{id}.locked"))
+    }
+
+    pub fn is_protected(&self) -> bool {
+        self.file.lock.is_some()
+    }
+
+    /// Whether the transcripts can be read now: not protected, or unlocked in this session.
+    pub fn is_unlocked(&self) -> bool {
+        !self.is_protected() || crypt::key_for(&self.dir).is_some()
+    }
+
+    /// Read bytes that may be sealed, opening them with the project's key.
+    pub fn read_maybe_sealed(&self, path: &Path) -> Result<Vec<u8>> {
+        let data = std::fs::read(path)?;
+        if !crypt::is_sealed(&data) {
+            return Ok(data);
         }
-        Ok(Some(Transcript::from_json(&std::fs::read_to_string(p)?)?))
+        let key = crypt::key_for(&self.dir).ok_or(ProjectError::Locked)?;
+        Ok(crypt::unseal(&key, &data)?)
+    }
+
+    /// Bytes as the project stores them: sealed when it is password protected.
+    pub fn seal_if_protected(&self, data: &[u8]) -> Result<Vec<u8>> {
+        if !self.is_protected() {
+            return Ok(data.to_vec());
+        }
+        let key = crypt::key_for(&self.dir).ok_or(ProjectError::Locked)?;
+        Ok(crypt::seal(&key, data))
+    }
+
+    pub fn load_transcript(&self, id: &str) -> Result<Option<Transcript>> {
+        // Turning protection on or off can be cut short by a crash and leave both files; the one in the project's
+        // current mode was written last.
+        let (sealed, plain) = (self.locked_path(id), self.transcript_path(id));
+        let p = match (self.is_protected(), sealed.exists(), plain.exists()) {
+            (_, false, false) => return Ok(None),
+            (true, true, _) | (false, true, false) => sealed,
+            _ => plain,
+        };
+        let bytes = self.read_maybe_sealed(&p)?;
+        Ok(Some(Transcript::from_json(&String::from_utf8_lossy(&bytes))?))
     }
 
     pub fn save_transcript(&self, t: &Transcript) -> Result<()> {
-        write_atomic(&self.transcript_path(&t.media), t.to_json().as_bytes())?;
+        let json = t.to_json();
+        if self.is_protected() {
+            write_atomic(&self.locked_path(&t.media), &self.seal_if_protected(json.as_bytes())?)?;
+            remove_if_there(&self.transcript_path(&t.media))?;
+        } else {
+            write_atomic(&self.transcript_path(&t.media), json.as_bytes())?;
+            remove_if_there(&self.locked_path(&t.media))?;
+        }
         Ok(())
+    }
+
+    /// Unlock a password-protected project for this session.
+    pub fn unlock(&self, password: &str) -> Result<()> {
+        let lock = self.file.lock.as_ref().ok_or(ProjectError::Locked)?;
+        crypt::remember(&self.dir, crypt::open_lock(lock, password)?);
+        Ok(())
+    }
+
+    /// Turn password protection on (`Some`), change the password, or turn it off (`None`). Every transcript is
+    /// read with the old key and written again with the new one, or in plain text. The project must be unlocked.
+    pub fn set_password(dir: &Path, password: Option<&str>) -> Result<()> {
+        Project::update(dir, |p| {
+            if !p.is_unlocked() {
+                return Err(ProjectError::Locked);
+            }
+            let ids: Vec<String> = p.file.files.iter().map(|m| m.id.clone()).collect();
+            let all: Vec<Transcript> = ids.iter().filter_map(|id| p.load_transcript(id).transpose()).collect::<Result<_>>()?;
+            match password {
+                Some(pw) => {
+                    let (lock, key) = crypt::new_lock(pw)?;
+                    p.file.lock = Some(lock);
+                    crypt::remember(&p.dir, key);
+                }
+                None => {
+                    p.file.lock = None;
+                    crypt::forget(&p.dir);
+                }
+            }
+            // The project file first, so a crash part way leaves files the project can still read.
+            p.save()?;
+            for t in &all {
+                p.save_transcript(t)?;
+            }
+            Ok(())
+        })
     }
 
     /// Change the project on disk safely while other threads may be changing it too: open it fresh, apply `f`, save,
@@ -322,7 +463,7 @@ impl Project {
     pub fn update<R>(dir: &Path, f: impl FnOnce(&mut Project) -> Result<R>) -> Result<R> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut p = Project::open(dir)?;
+        let mut p = Project::open_file(dir)?;
         let r = f(&mut p)?;
         p.save()?;
         Ok(r)
@@ -388,6 +529,55 @@ mod tests {
         assert_eq!(p.load_transcript("F1").unwrap().unwrap(), t);
         std::fs::write(p.temp_dir().join("chunk.wav"), b"x").unwrap();
         assert_eq!(p.clean_up().unwrap(), 1);
+    }
+
+    #[test]
+    fn password_protection_on_change_and_off() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut p = Project::create(tmp.path(), "x").unwrap();
+        assert_eq!(p.file.id.len(), 16);
+        let rec = tmp.path().join("a.wav");
+        std::fs::write(&rec, b"RIFF").unwrap();
+        let id = p.add_media(&rec, ImportFields::default(), false).unwrap();
+        let mut t = crate::model::tests::sample();
+        t.media = id.clone();
+        p.save_transcript(&t).unwrap();
+
+        Project::set_password(tmp.path(), Some("open sesame")).unwrap();
+        let p = Project::open(tmp.path()).unwrap();
+        assert!(p.is_protected() && p.is_unlocked());
+        assert!(!p.transcript_path(&id).exists(), "the plain copy is gone");
+        let raw = std::fs::read(p.locked_path(&id)).unwrap();
+        assert!(crate::crypt::is_sealed(&raw) && !raw.windows(5).any(|w| w == b"Maria"));
+        assert_eq!(p.load_transcript(&id).unwrap().unwrap(), t);
+
+        // Locked: nothing can be read or written; a wrong password is refused; the right one opens it.
+        crate::crypt::forget(tmp.path());
+        assert!(matches!(p.load_transcript(&id), Err(ProjectError::Locked)));
+        assert!(matches!(p.save_transcript(&t), Err(ProjectError::Locked)));
+        assert!(matches!(Project::set_password(tmp.path(), None), Err(ProjectError::Locked)));
+        assert!(matches!(p.unlock("open says me"), Err(ProjectError::Crypt(CryptError::WrongPassword))));
+        p.unlock("open sesame").unwrap();
+        assert_eq!(p.load_transcript(&id).unwrap().unwrap(), t);
+
+        Project::set_password(tmp.path(), Some("new one")).unwrap();
+        crate::crypt::forget(tmp.path());
+        let p = Project::open(tmp.path()).unwrap();
+        assert!(p.unlock("open sesame").is_err());
+        p.unlock("new one").unwrap();
+        Project::set_password(tmp.path(), None).unwrap();
+        let p = Project::open(tmp.path()).unwrap();
+        assert!(!p.is_protected() && !p.locked_path(&id).exists());
+        assert_eq!(p.load_transcript(&id).unwrap().unwrap(), t);
+    }
+
+    #[test]
+    fn an_old_project_gets_an_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(PROJECT_FILE), r#"{"format":"Prism Transcribe project","schema_version":1,"name":"old","created":"2026-11-01T00:00:00Z"}"#).unwrap();
+        let p = Project::open(tmp.path()).unwrap();
+        assert_eq!(p.file.id.len(), 16);
+        assert_eq!(Project::open(tmp.path()).unwrap().file.id, p.file.id, "kept");
     }
 
     #[test]

@@ -3,6 +3,45 @@
 Things the build sessions could not check themselves. Newest phase first. When one is done, delete it and note the
 result in the matching results file.
 
+## Phase 4
+
+The build session drove the whole flow through the real window on the heavy pack's transcript of the two-speaker
+fixture: a key file outside the project; a pasted roster (Maria Delgado = P07, Riverside College = [College]);
+names replaced with the snapshot "Before de-identification" kept; the email address and phone number flagged and
+accepted; with only Riverside College on the list, "Delgado" suggested as likely a name and "Maria" as possibly one;
+the final check passing; Mark as de-identified; the log (4 changes, accepted by the Windows user); a de-identified
+export with none of the names in it; password protection on (transcript and key file sealed, no readable words);
+Lock, a wrong password refused, the right one accepted, the editor showing P07. The checks below need a person.
+
+- [ ] **The phase's own test, on a real project.** De-identify a real set of interviews end to end (paste the
+  roster from the spreadsheet you keep, then Personal details, Possible names, Final check) and export one marked
+  de-identified. It should pass the final check with zero names from the list left. Judge whether the replacements
+  read naturally ("P07's", "[College]") and whether word times still line up when you click a replaced word.
+- [ ] **How noisy the two review lists are.** On a real hour-long interview, count how many Personal details and
+  Possible names are false alarms (ordinary dates and numbers; capitalised words at the start of sentences) and how
+  many real names or details each one missed. The rules are in `crates/core/src/deid.rs`; a local named-entity model
+  is open decision 8, after the first release.
+- [ ] **The key file on a removable drive.** Save the key file to a USB stick, close the app, unplug it, reopen: De-
+  identify should say the key file is not there; plug it back in and press Try again. Also try a key file saved
+  inside the project folder: the app should warn.
+- [ ] **Password protection over days.** Turn it on for a real project, close and reopen the app, unlock, edit,
+  change the password, turn it off. With several dozen transcripts, note how long turning it on takes. The
+  transcripts are lost if the password is: that is by design, and the app says so before it seals anything.
+- [ ] **The data handling statement.** Save it as Word from Privacy and read it as an ethics board would: is it
+  true, plain and complete for your protocol? It is written from the project's and the computer's actual set-up.
+- [ ] **Offline, with a network monitor.** With Offline on, use Resource Monitor's Network tab (or Wireshark) while
+  importing, transcribing, de-identifying and exporting: prism-transcribe.exe and its WebView2 processes should open
+  no connection. The build session checked the code paths, not the wire.
+- [ ] **Screen reader (NVDA) on De-identify:** the tabs, the names table, the review lists and their Accept and Skip
+  buttons, the unlock screen and the password fields.
+- [ ] **Another language's dictionary.** On a non-English project, Possible names uses Windows' dictionary for the
+  project's language if that language pack is installed (Settings > Time & language > Language); otherwise capital
+  letters alone decide. Check what it says ("Using Windows' ... dictionary") and how useful the list is.
+- [ ] **What is not covered, to decide:** text typed over by hand in the editor is not logged (only the De-identify
+  passes are); snapshots keep the words from before (never exported, but in the project folder); the temporary audio
+  and job files of a running transcription are not sealed by the password; and the editor's spell-check underline
+  still comes from WebView2, which cannot take the project word list.
+
 ## Phase 3
 
 - [ ] **Speakers, by hand.** In a transcript: open Speakers (Ctrl+Shift+P), name a speaker and give a role and an
@@ -55,9 +94,10 @@ result in the matching results file.
   Find) read sensibly.
 - [ ] **Video in the editor.** An MP4 shows its picture above the waveform. A file the browser cannot play (WMA, AVI,
   MKV) plays from a sound-only copy, with a note saying so.
-- [ ] **Spell check.** Words are underlined by Windows' own spell checker. The spec's *project word list* (so participants'
-  pseudonyms stop being flagged) is **not built yet**: the browser's spell checker does not take a custom list. It
-  needs a spell checker of our own, and is carried to the next phase.
+- [ ] **Spell check.** Words are underlined by Windows' own spell checker. The *project word list* exists since phase 4
+  (De-identify > Possible names, where it stops words being suggested as names), but the editor's underline still
+  comes from WebView2, which cannot take a custom list; underlining from our own checker with the word list is
+  still to do.
 
 ## Phase 1
 

@@ -1,5 +1,5 @@
 // Prism Transcribe: projects, import, transcribe with progress, a read-only transcript, export, models. The editor is
-// editor/Editor.tsx.
+// editor/Editor.tsx, de-identification deid.tsx, password protection and the data handling statement privacy.tsx.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
@@ -21,6 +21,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   api,
   on,
+  type ExportCheck,
   type ExportOptions,
   type ImportEvent,
   type ImportFields,
@@ -36,6 +37,8 @@ import {
 } from './api';
 import { duration, hms, LOW_CONFIDENCE, progressText } from './format';
 import { Editor } from './editor/Editor';
+import { DeidView } from './deid';
+import { PrivacyDialog, UnlockPanel } from './privacy';
 
 const MEDIA_EXTENSIONS = ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'mov', 'mkv', 'avi', 'webm'];
 const STATUS_WORDS: Record<MediaFile['status'], string> = {
@@ -65,6 +68,8 @@ export function App() {
   const [editing, setEditing] = useState<{ file: MediaFile; transcript: Transcript } | null>(null);
   const [exporting, setExporting] = useState<MediaFile | null>(null);
   const [details, setDetails] = useState<MediaFile | null>(null);
+  const [deid, setDeid] = useState(false);
+  const [privacy, setPrivacy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -108,9 +113,9 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
-    if (!selected) return setTranscript(null);
+    if (!selected || project?.locked) return setTranscript(null);
     api.transcript(selected).then(setTranscript).catch(() => setTranscript(null));
-  }, [selected]);
+  }, [selected, project?.locked]);
 
   const openProject = async () => {
     const dir = await open({ directory: true, title: 'Open a Prism Transcribe project folder' });
@@ -119,6 +124,7 @@ export function App() {
       const p = await api.projectOpen(dir);
       setProject(p);
       setSelected(null);
+      setDeid(false);
       if (p.warnings.length) {
         const names = p.warnings.map(([id, c]) => `${p.files.find((f) => f.id === id)?.label ?? id} (${c.state === 'missing' ? 'missing' : 'changed since import'})`);
         setNotice(`Check these recordings: ${names.join(', ')}.`);
@@ -139,7 +145,7 @@ export function App() {
     if (t) setEditing({ file: f, transcript: t });
   };
 
-  const exportAs = async (f: MediaFile, kind: 'docx' | 'txt', options: ExportOptions) => {
+  const exportAs = async (f: MediaFile, kind: 'docx' | 'txt', options: ExportOptions, deidentified: boolean) => {
     const path = await save({
       title: kind === 'docx' ? 'Export to Word' : 'Export to plain text',
       defaultPath: `${f.label}.${kind}`,
@@ -147,8 +153,8 @@ export function App() {
     });
     if (!path) return;
     try {
-      await api.exportFile(f.id, path, options);
-      setNotice(`Exported ${f.label} to ${path}.`);
+      await api.exportFile(f.id, path, options, deidentified);
+      setNotice(`Exported ${f.label} to ${path}${deidentified ? ', checked: no name from the list is in it' : ''}.`);
     } catch (e) {
       setNotice(message(e));
     }
@@ -173,6 +179,12 @@ export function App() {
         <h1>Prism Transcribe</h1>
         {project && <span className="project-name">{project.name}</span>}
         <div className="spacer" />
+        {project && !project.locked && !editing && (
+          <Button onPress={() => setDeid(!deid)} aria-pressed={deid}>
+            De-identify
+          </Button>
+        )}
+        {project && !project.locked && !editing && <Button onPress={() => setPrivacy(true)}>Privacy</Button>}
         <Button onPress={() => setNewProject(true)}>New project</Button>
         <Button onPress={openProject}>Open project</Button>
         <Button onPress={() => setSettingsOpen(true)}>Settings</Button>
@@ -202,6 +214,18 @@ export function App() {
           }}
           onSaved={() => {}}
           onNotice={setNotice}
+        />
+      ) : project?.locked ? (
+        <UnlockPanel project={project} onUnlocked={setProject} />
+      ) : project && deid ? (
+        <DeidView
+          project={project}
+          onClose={() => setDeid(false)}
+          onNotice={setNotice}
+          onChanged={() => {
+            refresh();
+            if (selected) api.transcript(selected).then(setTranscript).catch(() => setTranscript(null));
+          }}
         />
       ) : !project ? (
         <main className="empty">
@@ -263,6 +287,7 @@ export function App() {
             <span aria-hidden="true">🔒</span> Offline
           </span>
         )}
+        {project?.protected && <span>{project.locked ? 'Transcripts sealed and locked' : 'Transcripts password protected'}</span>}
         {project && <span>{project.ffmpeg ? 'FFmpeg found: video can be imported' : 'No FFmpeg: video and some audio formats cannot be imported'}</span>}
         {project && (
           <Button className="quiet" isDisabled={job !== null} onPress={async () => setNotice(`Removed ${await api.cleanUp()} temporary file(s).`)}>
@@ -314,12 +339,28 @@ export function App() {
       <ExportDialog
         file={exporting}
         onClose={() => setExporting(null)}
-        onExport={(kind, opts) => {
+        onExport={(kind, opts, deidentified) => {
           const f = exporting!;
           setExporting(null);
-          exportAs(f, kind, opts);
+          exportAs(f, kind, opts, deidentified);
         }}
       />
+      {project && (
+        <PrivacyDialog
+          isOpen={privacy}
+          project={project}
+          settings={settings}
+          onClose={() => setPrivacy(false)}
+          onProject={(p) => {
+            setProject(p);
+            if (p.locked) {
+              setDeid(false);
+              setSelected(null);
+            }
+          }}
+          onNotice={setNotice}
+        />
+      )}
       <SettingsDialog
         isOpen={settingsOpen}
         settings={settings}
@@ -806,11 +847,26 @@ function HeavyPack(props: {
   );
 }
 
-function ExportDialog(props: { file: MediaFile | null; onClose: () => void; onExport: (kind: 'docx' | 'txt', o: ExportOptions) => void }) {
+function ExportDialog(props: { file: MediaFile | null; onClose: () => void; onExport: (kind: 'docx' | 'txt', o: ExportOptions, deidentified: boolean) => void }) {
   const [kind, setKind] = useState<'docx' | 'txt'>('docx');
   const [stamps, setStamps] = useState('per_turn');
   const [clean, setClean] = useState(false);
   const [lines, setLines] = useState(false);
+  const [check, setCheck] = useState<ExportCheck | null>(null);
+  const [deid, setDeid] = useState(false);
+  useEffect(() => {
+    setCheck(null);
+    if (!props.file) return;
+    api
+      .exportCheck(props.file.id)
+      .then((c) => {
+        setCheck(c);
+        setDeid(c.deidentified && c.key.state === 'ready');
+      })
+      .catch(() => setCheck(null));
+  }, [props.file]);
+  const keyReady = check?.key.state === 'ready';
+  const left = check?.check?.leftovers ?? [];
   return (
     <ModalOverlay isOpen={!!props.file} onOpenChange={(o) => !o && props.onClose()} isDismissable>
       <Modal>
@@ -837,16 +893,41 @@ function ExportDialog(props: { file: MediaFile | null; onClose: () => void; onEx
               <span className="box" aria-hidden="true" /> Number the lines
             </Checkbox>
           )}
+          <Checkbox isSelected={deid} onChange={setDeid} isDisabled={!keyReady}>
+            <span className="box" aria-hidden="true" /> De-identified: check that no name from the list is in it
+          </Checkbox>
+          {check && !keyReady && <p className="hint">There is no key file for this project yet, so there is no name list to check against. Start in De-identify.</p>}
+          {check && !check.deidentified && (
+            <p className="warning" role="alert">
+              {props.file?.label} has not been marked de-identified. This export may contain real names.
+            </p>
+          )}
+          {deid && left.length > 0 && (
+            <p className="warning" role="alert">
+              {left.length} name{left.length === 1 ? '' : 's'} from the list {left.length === 1 ? 'is' : 'are'} still in {props.file?.label} (
+              {left
+                .slice(0, 5)
+                .map((l) => `${l.text}, ${l.place}`)
+                .join('; ')}
+              {left.length > 5 ? '…' : ''}). The de-identified export will be refused until they are replaced.
+            </p>
+          )}
+          {deid && keyReady && left.length === 0 && check?.check && <p className="hint">Passes the final check: no name from the list.</p>}
           <div className="row end">
             <Button onPress={props.onClose}>Cancel</Button>
             <Button
               className="primary"
+              isDisabled={deid && left.length > 0}
               onPress={() =>
-                props.onExport(kind, {
-                  timestamps: stamps === 'every' ? { mode: 'every', seconds: 30 } : stamps === 'none' ? { mode: 'none' } : { mode: 'per_turn' },
-                  line_numbers: kind === 'docx' && lines,
-                  clean,
-                })
+                props.onExport(
+                  kind,
+                  {
+                    timestamps: stamps === 'every' ? { mode: 'every', seconds: 30 } : stamps === 'none' ? { mode: 'none' } : { mode: 'per_turn' },
+                    line_numbers: kind === 'docx' && lines,
+                    clean,
+                  },
+                  deid,
+                )
               }
             >
               Choose where to save…

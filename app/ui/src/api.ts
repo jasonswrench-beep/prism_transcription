@@ -42,6 +42,10 @@ export interface ProjectView {
   files: MediaFile[];
   warnings: [string, MediaCheck][];
   ffmpeg: string | null;
+  /** Password protection is on, and whether this session has not unlocked it yet. */
+  protected: boolean;
+  locked: boolean;
+  word_list: string[];
 }
 
 export interface Word {
@@ -191,6 +195,86 @@ export interface ExportOptions {
   clean: boolean;
 }
 
+// ---- De-identification (T6) ----
+
+export type NameKind = 'person' | 'place' | 'organisation' | 'other';
+
+export interface NameEntry {
+  real: string;
+  variants: string[];
+  replacement: string;
+  kind: NameKind;
+  source: 'typed' | 'roster' | 'suggestion';
+}
+
+export interface LogEntry {
+  when: string;
+  file: string;
+  label: string;
+  place: string;
+  at?: number | null;
+  original: string;
+  replacement: string;
+  reason: string;
+  by: string;
+}
+
+export type PatternKind = 'email' | 'web_address' | 'phone' | 'address' | 'date' | 'birth' | 'id_number';
+
+export interface Flag {
+  file: string;
+  label: string;
+  turn: number;
+  start: number;
+  end: number;
+  text: string;
+  kind: PatternKind;
+  at: number;
+  before: string;
+  after: string;
+}
+
+export interface Suggestion {
+  word: string;
+  likelihood: 'likely' | 'possible';
+  count: number;
+  files: string[];
+  examples: [string, number, string, string][];
+}
+
+export interface Leftover {
+  place: string;
+  text: string;
+  at?: number | null;
+}
+
+export interface FileCheck {
+  file: string;
+  label: string;
+  review: ReviewStatus;
+  transcribed: boolean;
+  leftovers: Leftover[];
+  snapshots_with_names: number;
+}
+
+export type KeyState =
+  | { state: 'none' }
+  | { state: 'missing'; path: string }
+  | { state: 'unreadable'; path: string; message: string }
+  | { state: 'ready'; path: string; names: number; changes: number; inside_project: boolean };
+
+export interface FileCount {
+  file: string;
+  label: string;
+  count: number;
+}
+
+export interface ExportCheck {
+  deidentified: boolean;
+  key: KeyState;
+  check: FileCheck | null;
+}
+
 export const api = {
   projectNew: (dir: string, name: string) => invoke<ProjectView>('project_new', { dir, name }),
   projectOpen: (path: string) => invoke<ProjectView>('project_open', { path }),
@@ -201,7 +285,31 @@ export const api = {
   transcribe: (id: string) => invoke<void>('transcribe', { id }),
   cancel: () => invoke<void>('cancel'),
   transcript: (id: string) => invoke<Transcript | null>('transcript', { id }),
-  exportFile: (id: string, path: string, options: ExportOptions) => invoke<void>('export', { id, path, options }),
+  exportFile: (id: string, path: string, options: ExportOptions, deidentified: boolean) => invoke<void>('export', { id, path, options, deidentified }),
+  exportCheck: (id: string) => invoke<ExportCheck>('export_check', { id }),
+  keyState: () => invoke<KeyState>('deid_key_state'),
+  keyUse: (path: string) => invoke<KeyState>('deid_key_use', { path }),
+  names: () => invoke<NameEntry[]>('deid_names'),
+  setNames: (names: NameEntry[]) => invoke<NameEntry[]>('deid_names_set', { names }),
+  pasteNames: (text: string) => invoke<NameEntry[]>('deid_names_paste', { text }),
+  autoVariants: (real: string, kind: NameKind) => invoke<string[]>('deid_auto_variants', { real, kind }),
+  namesPreview: () => invoke<FileCount[]>('deid_names_preview'),
+  namesApply: () => invoke<FileCount[]>('deid_names_apply'),
+  flags: () => invoke<Flag[]>('deid_flags'),
+  flagApply: (flag: Flag, replacement: string) => invoke<boolean>('deid_flag_apply', { flag, replacement }),
+  flagSkip: (text: string) => invoke<void>('deid_flag_skip', { text }),
+  suggestions: () => invoke<{ list: Suggestion[]; dictionary: string | null }>('deid_suggestions'),
+  suggestionAccept: (word: string, replacement: string, kind: NameKind) => invoke<FileCount[]>('deid_suggestion_accept', { word, replacement, kind }),
+  suggestionSkip: (word: string) => invoke<string[]>('deid_suggestion_skip', { word }),
+  setWordList: (words: string[]) => invoke<string[]>('word_list_set', { words }),
+  finalCheck: () => invoke<FileCheck[]>('deid_check'),
+  markDeidentified: (id: string) => invoke<FileCheck>('deid_mark', { id }),
+  deidLog: () => invoke<LogEntry[]>('deid_log'),
+  setPassword: (password: string | null) => invoke<ProjectView>('project_password_set', { password }),
+  unlock: (password: string) => invoke<ProjectView>('project_unlock', { password }),
+  lock: () => invoke<ProjectView>('project_lock'),
+  statementText: () => invoke<string>('statement_text'),
+  statementExport: (path: string) => invoke<void>('statement_export', { path }),
   modelsStatus: () => invoke<ModelStatus>('models_status'),
   modelsInstall: (pack?: string) => invoke<void>('models_install', { pack: pack ?? null }),
   modelsImportZip: (path: string, pack?: string) => invoke<ModelStatus>('models_import_zip', { path, pack: pack ?? null }),

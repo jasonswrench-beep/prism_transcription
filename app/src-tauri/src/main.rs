@@ -1,5 +1,6 @@
-// Prism Transcribe's desktop shell. Phase 1: create or open a project, import recordings, transcribe one at a
-// time with progress, read the transcript, export it to Word or plain text, and install the speech models.
+// Prism Transcribe's desktop shell: projects, import, transcription with progress, the editor (phase 2), speakers
+// (phase 3), de-identification, password protection and the data handling statement (phase 4), export, and the
+// model manager.
 //
 // Long work runs on its own thread and reports through events ("job", "install", "import"); the window never
 // waits on it. Nothing here touches the network except the model install, which the Offline switch blocks.
@@ -7,6 +8,7 @@
 
 mod media_protocol;
 
+use prism_transcribe_core::deid::{FileCheck, Flag, LogEntry, NameEntry, NameKind, Suggestion};
 use prism_transcribe_core::edit::{self, FindOptions};
 use prism_transcribe_core::speakers;
 use prism_transcribe_core::export::ExportOptions;
@@ -41,6 +43,10 @@ struct ProjectView {
     /// Recordings that changed or went missing since import (T1).
     warnings: Vec<(String, MediaCheck)>,
     ffmpeg: Option<String>,
+    /// Password protection: on, and whether this session has unlocked it.
+    protected: bool,
+    locked: bool,
+    word_list: Vec<String>,
 }
 
 fn view(dir: &std::path::Path, check: bool) -> Res<ProjectView> {
@@ -52,6 +58,9 @@ fn view(dir: &std::path::Path, check: bool) -> Res<ProjectView> {
         files: p.file.files.clone(),
         warnings,
         ffmpeg: Settings::load().ffmpeg().map(|f| f.display().to_string()),
+        protected: p.is_protected(),
+        locked: !p.is_unlocked(),
+        word_list: p.file.word_list.clone(),
     })
 }
 
@@ -179,12 +188,34 @@ fn transcript(state: State<AppState>, id: String) -> Res<Option<Transcript>> {
     Project::open(&current(&state)?).map_err(err)?.load_transcript(&id).map_err(err)
 }
 
+/// Export a transcript. With `deidentified`, the export is refused unless the file passes the final check (T6).
 #[tauri::command]
-fn export(state: State<AppState>, id: String, path: String, options: ExportOptions) -> Res<()> {
+fn export(state: State<AppState>, id: String, path: String, options: ExportOptions, deidentified: bool) -> Res<()> {
     let out = PathBuf::from(&path);
     let fmt = ExportFormat::from_path(&out).ok_or("Choose a file ending in .docx or .txt.")?;
     let p = Project::open(&current(&state)?).map_err(err)?;
-    engine::export(&p, &id, fmt, &out, &options).map_err(err)
+    engine::export_checked(&p, &id, fmt, &out, &options, deidentified).map_err(err)
+}
+
+/// What the export dialog shows before exporting: the file's review status and, when there is a key file, the final
+/// check.
+#[derive(Serialize)]
+struct ExportCheck {
+    deidentified: bool,
+    key: engine::deid::KeyState,
+    check: Option<FileCheck>,
+}
+
+#[tauri::command]
+fn export_check(state: State<AppState>, id: String) -> Res<ExportCheck> {
+    let dir = current(&state)?;
+    let key = engine::deid::key_state(&dir).map_err(err)?;
+    let check = match key {
+        engine::deid::KeyState::Ready { .. } => Some(engine::deid::check_one(&dir, &id).map_err(err)?),
+        _ => None,
+    };
+    let review = Project::open(&dir).map_err(err)?.load_transcript(&id).map_err(err)?.map(|t| t.review).unwrap_or_default();
+    Ok(ExportCheck { deidentified: prism_transcribe_core::deid::is_deidentified(review), key, check })
 }
 
 /// The light pack's state at the top level (what the first-run panel needs), and the heavy pack's beside it.
@@ -264,7 +295,9 @@ fn settings_get() -> Settings {
 }
 
 #[tauri::command]
-fn settings_set(settings: Settings) -> Res<Settings> {
+fn settings_set(mut settings: Settings) -> Res<Settings> {
+    // Where the key files are is set only by De-identify; the Settings window never overwrites it.
+    settings.key_files = Settings::load().key_files;
     settings.save().map_err(err)?;
     Ok(Settings::load())
 }
@@ -438,6 +471,179 @@ fn hotkeys_default() -> std::collections::BTreeMap<String, String> {
     engine::default_hotkeys()
 }
 
+// ---- De-identification (T6) ----
+
+use engine::deid as di;
+
+#[tauri::command]
+fn deid_key_state(state: State<AppState>) -> Res<di::KeyState> {
+    di::key_state(&current(&state)?).map_err(err)
+}
+
+/// Open or start the key file at `path`.
+#[tauri::command]
+fn deid_key_use(state: State<AppState>, path: String) -> Res<di::KeyState> {
+    di::key_use(&current(&state)?, PathBuf::from(path).as_path()).map_err(err)
+}
+
+#[tauri::command]
+fn deid_names(state: State<AppState>) -> Res<Vec<NameEntry>> {
+    Ok(di::key_open(&current(&state)?).map_err(err)?.2.names)
+}
+
+#[tauri::command]
+fn deid_names_set(state: State<AppState>, names: Vec<NameEntry>) -> Res<Vec<NameEntry>> {
+    di::names_set(&current(&state)?, names).map_err(err)
+}
+
+#[tauri::command]
+fn deid_names_paste(state: State<AppState>, text: String) -> Res<Vec<NameEntry>> {
+    di::names_paste(&current(&state)?, &text).map_err(err)
+}
+
+#[tauri::command]
+fn deid_auto_variants(real: String, kind: NameKind) -> Vec<String> {
+    prism_transcribe_core::deid::auto_variants(&real, kind)
+}
+
+#[tauri::command]
+async fn deid_names_preview(state: State<'_, AppState>) -> Res<Vec<di::FileCount>> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || di::names_preview(&dir).map_err(err)).await.map_err(err)?
+}
+
+#[tauri::command]
+async fn deid_names_apply(state: State<'_, AppState>) -> Res<Vec<di::FileCount>> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || di::names_apply(&dir).map_err(err)).await.map_err(err)?
+}
+
+#[tauri::command]
+async fn deid_flags(state: State<'_, AppState>) -> Res<Vec<Flag>> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || di::flags_find(&dir).map_err(err)).await.map_err(err)?
+}
+
+#[tauri::command]
+fn deid_flag_apply(state: State<AppState>, flag: Flag, replacement: String) -> Res<bool> {
+    di::flag_apply(&current(&state)?, &flag, &replacement).map_err(err)
+}
+
+#[tauri::command]
+fn deid_flag_skip(state: State<AppState>, text: String) -> Res<()> {
+    di::flag_skip(&current(&state)?, &text).map_err(err)
+}
+
+#[derive(Serialize)]
+struct Suggestions {
+    list: Vec<Suggestion>,
+    /// The dictionary used ("en-US"), or none when Windows has none for the language.
+    dictionary: Option<String>,
+}
+
+#[tauri::command]
+async fn deid_suggestions(state: State<'_, AppState>) -> Res<Suggestions> {
+    let dir = current(&state)?;
+    let (list, dictionary) = tauri::async_runtime::spawn_blocking(move || di::suggestions(&dir).map_err(err)).await.map_err(err)??;
+    Ok(Suggestions { list, dictionary })
+}
+
+#[tauri::command]
+async fn deid_suggestion_accept(state: State<'_, AppState>, word: String, replacement: String, kind: NameKind) -> Res<Vec<di::FileCount>> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || di::suggestion_accept(&dir, &word, &replacement, kind).map_err(err)).await.map_err(err)?
+}
+
+#[tauri::command]
+fn deid_suggestion_skip(state: State<AppState>, word: String) -> Res<Vec<String>> {
+    di::suggestion_skip(&current(&state)?, &word).map_err(err)
+}
+
+#[tauri::command]
+fn word_list_set(state: State<AppState>, words: Vec<String>) -> Res<Vec<String>> {
+    di::word_list_set(&current(&state)?, words).map_err(err)
+}
+
+#[tauri::command]
+async fn deid_check(state: State<'_, AppState>) -> Res<Vec<FileCheck>> {
+    let dir = current(&state)?;
+    tauri::async_runtime::spawn_blocking(move || di::final_check(&dir).map_err(err)).await.map_err(err)?
+}
+
+#[tauri::command]
+fn deid_mark(state: State<AppState>, id: String) -> Res<FileCheck> {
+    di::mark_deidentified(&current(&state)?, &id).map_err(err)
+}
+
+#[tauri::command]
+fn deid_log(state: State<AppState>) -> Res<Vec<LogEntry>> {
+    di::log(&current(&state)?).map_err(err)
+}
+
+// ---- Privacy: password protection and the data handling statement ----
+
+/// Turn password protection on, change the password, or turn it off (`None`). Waits for no running job.
+#[tauri::command]
+async fn project_password_set(state: State<'_, AppState>, password: Option<String>) -> Res<ProjectView> {
+    if state.busy.lock().unwrap().is_some() {
+        return Err("Wait until the running job ends.".into());
+    }
+    let dir = current(&state)?;
+    let d = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Res<()> {
+        // The key file is sealed with the project's password too: read it with the old key, write it with the new.
+        let key = di::key_open(&d).ok();
+        Project::set_password(&d, password.as_deref().filter(|p| !p.is_empty())).map_err(err)?;
+        if let Some((_, path, k)) = key {
+            k.save(&path, &Project::open(&d).map_err(err)?).map_err(err)?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(err)??;
+    view(&dir, false)
+}
+
+#[tauri::command]
+async fn project_unlock(state: State<'_, AppState>, password: String) -> Res<ProjectView> {
+    let dir = current(&state)?;
+    let d = dir.clone();
+    tauri::async_runtime::spawn_blocking(move || Project::open(&d).and_then(|p| p.unlock(&password)).map_err(err)).await.map_err(err)??;
+    view(&dir, false)
+}
+
+/// Lock a protected project now: its key leaves memory.
+#[tauri::command]
+fn project_lock(state: State<AppState>) -> Res<ProjectView> {
+    if state.busy.lock().unwrap().is_some() {
+        return Err("Wait until the running job ends.".into());
+    }
+    let dir = current(&state)?;
+    prism_transcribe_core::crypt::forget(&dir);
+    view(&dir, false)
+}
+
+/// Save the data handling statement as .docx or .txt.
+#[tauri::command]
+fn statement_export(state: State<AppState>, path: String) -> Res<()> {
+    let dir = current(&state)?;
+    let blocks = engine::statement::blocks(&dir, &Settings::load()).map_err(err)?;
+    let out = PathBuf::from(&path);
+    let bytes = match ExportFormat::from_path(&out) {
+        Some(ExportFormat::Word) => prism_transcribe_core::export::blocks_to_docx("Data handling statement", &blocks).map_err(err)?,
+        Some(ExportFormat::Text) => prism_transcribe_core::export::blocks_to_text(&blocks).into_bytes(),
+        None => return Err("Choose a file ending in .docx or .txt.".into()),
+    };
+    std::fs::write(&out, bytes).map_err(err)
+}
+
+/// The statement as text, for the window to show before saving.
+#[tauri::command]
+fn statement_text(state: State<AppState>) -> Res<String> {
+    let blocks = engine::statement::blocks(&current(&state)?, &Settings::load()).map_err(err)?;
+    Ok(prism_transcribe_core::export::blocks_to_text(&blocks))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -485,7 +691,31 @@ fn main() {
             hotkeys_default,
             speakers_edit,
             speakers_stats,
-            speakers_find_again
+            speakers_find_again,
+            export_check,
+            deid_key_state,
+            deid_key_use,
+            deid_names,
+            deid_names_set,
+            deid_names_paste,
+            deid_auto_variants,
+            deid_names_preview,
+            deid_names_apply,
+            deid_flags,
+            deid_flag_apply,
+            deid_flag_skip,
+            deid_suggestions,
+            deid_suggestion_accept,
+            deid_suggestion_skip,
+            word_list_set,
+            deid_check,
+            deid_mark,
+            deid_log,
+            project_password_set,
+            project_unlock,
+            project_lock,
+            statement_export,
+            statement_text
         ])
         .run(tauri::generate_context!())
         .expect("Prism Transcribe could not start");

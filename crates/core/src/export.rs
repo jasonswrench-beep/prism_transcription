@@ -121,6 +121,44 @@ fn run(text: &str, bold: bool) -> String {
 
 const W_NS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#;
 
+/// A block of a plain document (the data handling statement): a heading, a paragraph or a bulleted line.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Block {
+    Heading(String),
+    Para(String),
+    Bullet(String),
+}
+
+/// Blocks as plain text: headings underlined, bullets with "- ".
+pub fn blocks_to_text(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    for (i, b) in blocks.iter().enumerate() {
+        // A blank line closes a list.
+        if i > 0 && matches!(blocks[i - 1], Block::Bullet(_)) && !matches!(b, Block::Bullet(_)) {
+            out.push('\n');
+        }
+        match b {
+            Block::Heading(h) => out.push_str(&format!("{h}\n{}\n\n", "=".repeat(h.chars().count()))),
+            Block::Para(p) => out.push_str(&format!("{p}\n\n")),
+            Block::Bullet(p) => out.push_str(&format!("- {p}\n")),
+        }
+    }
+    out
+}
+
+/// Blocks as a .docx with no header: bold headings, bullets as indented lines with a bullet character.
+pub fn blocks_to_docx(title: &str, blocks: &[Block]) -> std::io::Result<Vec<u8>> {
+    let mut body = String::new();
+    for b in blocks {
+        match b {
+            Block::Heading(h) => body.push_str(&format!(r#"<w:p><w:pPr><w:spacing w:before="200" w:after="80"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="26"/></w:rPr><w:t xml:space="preserve">{}</w:t></w:r></w:p>"#, xml_escape(h))),
+            Block::Para(p) => body.push_str(&format!(r#"<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>{}</w:p>"#, run(p, false))),
+            Block::Bullet(p) => body.push_str(&format!(r#"<w:p><w:pPr><w:spacing w:after="40"/><w:ind w:left="360" w:hanging="240"/></w:pPr>{}</w:p>"#, run(&format!("\u{2022}\t{p}"), false))),
+        }
+    }
+    package(title, &body, "", None)
+}
+
 /// A .docx file, written by hand: the parts Word needs and nothing else.
 pub fn to_docx(t: &Transcript, label: &str, date: Option<&str>, title: &str, opts: &ExportOptions) -> std::io::Result<Vec<u8>> {
     let mut body = String::new();
@@ -134,13 +172,18 @@ pub fn to_docx(t: &Transcript, label: &str, date: Option<&str>, title: &str, opt
         body.push_str("</w:p>");
     }
     let line_numbers = if opts.line_numbers { r#"<w:lnNumType w:countBy="1" w:restart="continuous"/>"# } else { "" };
+    package(title, &body, line_numbers, Some(&header_line(label, date)))
+}
+
+/// The package around a document body: content types, relationships, the body, an optional header, the title.
+fn package(title: &str, body: &str, line_numbers: &str, header_text: Option<&str>) -> std::io::Result<Vec<u8>> {
+    // The header part is always there (the relationships name it); a document without a header leaves it empty
+    // and unreferenced.
+    let header_ref = if header_text.is_some() { r#"<w:headerReference w:type="default" r:id="rIdHeader"/>"# } else { "" };
     let document = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {W_NS}><w:body>{body}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/>{line_numbers}<w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>"#
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document {W_NS}><w:body>{body}<w:sectPr>{header_ref}{line_numbers}<w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>"#
     );
-    let header = format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr {W_NS}><w:p>{}</w:p></w:hdr>"#,
-        run(&header_line(label, date), false)
-    );
+    let header = format!(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr {W_NS}><w:p>{}</w:p></w:hdr>"#, run(header_text.unwrap_or(""), false));
     let core = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>{}</dc:title><dc:creator>Prism Transcribe</dc:creator></cp:coreProperties>"#,
         xml_escape(title)

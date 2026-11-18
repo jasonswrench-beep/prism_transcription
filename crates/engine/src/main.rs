@@ -8,6 +8,10 @@
 //!                        [--pack light-1|heavy-1] [--tracks mixed|tracks|channels]
 //!   prism-transcribe-cli transcribe <project> <id>
 //!   prism-transcribe-cli export <project> <id> <out.docx|out.txt> [--timestamps turn|none|<seconds>] [--line-numbers] [--clean]
+//!                        [--deidentified]   (refused unless no name from the key file's list is left)
+//!   prism-transcribe-cli check <project>   the final check (T6): names from the list left in each file
+//!   prism-transcribe-cli statement <project> <out.docx|out.txt>   the data handling statement
+//!   A password-protected project asks for its password on standard input.
 //!   prism-transcribe-cli run <recording> --out <out.docx|out.txt> [--speakers N] [--project <folder>] and the import options
 
 use prism_transcribe_core::export::{ExportOptions, Timestamps};
@@ -38,7 +42,7 @@ fn parse() -> Args {
     let mut it = std::env::args().skip(1).peekable();
     while let Some(x) = it.next() {
         if let Some(k) = x.strip_prefix("--") {
-            if matches!(k, "copy" | "line-numbers" | "clean" | "quick") {
+            if matches!(k, "copy" | "line-numbers" | "clean" | "quick" | "deidentified") {
                 a.flags.push(k.into());
             } else {
                 a.opts.insert(k.into(), it.next().unwrap_or_else(|| usage()));
@@ -48,6 +52,20 @@ fn parse() -> Args {
         }
     }
     a
+}
+
+/// A protected project's password, read from standard input (one line).
+fn unlock(dir: &str) {
+    let p = Project::open(dir.as_ref()).unwrap_or_else(|e| die(e));
+    if p.is_unlocked() {
+        return;
+    }
+    eprint!("Password for {}: ", p.file.name);
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line).unwrap_or_else(|e| die(e));
+    // Only the line ending goes: a password may end in a space.
+    p.unlock(line.trim_end_matches(['\r', '\n'])).unwrap_or_else(|e| die(e));
 }
 
 fn progress_line(p: Progress) -> bool {
@@ -162,14 +180,46 @@ fn main() {
         }
         Some("transcribe") => {
             let (proj, id) = (a.pos.get(1).unwrap_or_else(|| usage()), a.pos.get(2).unwrap_or_else(|| usage()));
+            unlock(proj);
             let t = engine::transcribe(proj.as_ref(), id, &settings, &mut progress_line).unwrap_or_else(|e| die(e));
             println!("{id}: {} turns, {} speakers, {:.1} s", t.turns.len(), t.speakers.len(), t.provenance.seconds);
         }
         Some("export") => {
             let (proj, id, out) = (a.pos.get(1).unwrap_or_else(|| usage()), a.pos.get(2).unwrap_or_else(|| usage()), a.pos.get(3).unwrap_or_else(|| usage()));
+            unlock(proj);
             let p = Project::open(proj.as_ref()).unwrap_or_else(|e| die(e));
             let fmt = ExportFormat::from_path(out.as_ref()).unwrap_or_else(|| die("the output must end in .docx or .txt"));
-            engine::export(&p, id, fmt, out.as_ref(), &export_opts(&a)).unwrap_or_else(|e| die(e));
+            let deid = a.flags.iter().any(|f| f == "deidentified");
+            engine::export_checked(&p, id, fmt, out.as_ref(), &export_opts(&a), deid).unwrap_or_else(|e| die(e));
+            println!("Wrote {out}{}", if deid { " (checked: no name from the list)" } else { "" });
+        }
+        Some("check") => {
+            let proj = a.pos.get(1).unwrap_or_else(|| usage());
+            unlock(proj);
+            let checks = engine::deid::final_check(proj.as_ref()).unwrap_or_else(|e| die(e));
+            let mut failing = 0;
+            for c in checks.iter().filter(|c| c.transcribed) {
+                if c.passes() {
+                    println!("{}\tpasses", c.label);
+                } else {
+                    failing += 1;
+                    let left: Vec<String> = c.leftovers.iter().map(|l| format!("{} ({})", l.text, l.place)).collect();
+                    println!("{}\t{} left: {}", c.label, left.len(), left.join(", "));
+                }
+            }
+            if failing > 0 {
+                std::process::exit(1);
+            }
+        }
+        Some("statement") => {
+            let (proj, out) = (a.pos.get(1).unwrap_or_else(|| usage()), a.pos.get(2).unwrap_or_else(|| usage()));
+            let blocks = engine::statement::blocks(proj.as_ref(), &settings).unwrap_or_else(|e| die(e));
+            let bytes = match ExportFormat::from_path(out.as_ref()) {
+                Some(ExportFormat::Word) => prism_transcribe_core::export::blocks_to_docx("Data handling statement", &blocks).unwrap_or_else(|e| die(e)),
+                Some(ExportFormat::Text) => prism_transcribe_core::export::blocks_to_text(&blocks).into_bytes(),
+                None => die("the output must end in .docx or .txt"),
+            };
+            std::fs::write(out, bytes).unwrap_or_else(|e| die(e));
             println!("Wrote {out}");
         }
         Some("run") => {

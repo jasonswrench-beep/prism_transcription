@@ -35,3 +35,7 @@ Code built into the program:
 
 - sherpa-onnx (Apache License 2.0) and ONNX Runtime (MIT), linked statically. vendor/sherpa-onnx carries one
   small change, described in vendor/PATCHES.md.
+- The RustCrypto project's argon2 and chacha20poly1305 crates (MIT or Apache License 2.0), for password protection.
+
+Used from Windows itself (not shipped): the Windows spell checker (ISpellChecker), for the de-identification
+suggestions pass.

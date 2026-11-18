@@ -4,7 +4,7 @@ Prism Transcribe turns interview and focus-group recordings into speaker-labelle
 researcher's own Windows computer, and sends them to PrismQDA. Nothing leaves the machine: the audio, the transcript
 and every file in between stay local, and the speech models run on the computer itself.
 
-**Status: phase 3 (speakers and the heavy pack).** The app creates or opens a project, imports recordings, installs
+**Status: phase 4 (de-identification and privacy).** The app creates or opens a project, imports recordings, installs
 and checks its speech models (or imports them from an offline zip), transcribes one file at a time with a resumable
 job, and opens each transcript in an editor:
 - **Panes:** the transcript beside the recording, with its picture when it has one, a waveform and a whole-file overview with a colour band per speaker.
@@ -15,8 +15,11 @@ job, and opens each transcript in an editor:
 - **Two packs:** the light pack (Parakeet, 25 European languages) and the optional heavy pack (Whisper large-v3-turbo, about 99 languages), chosen per file or by its language.
 - **Keeping and reviewing:** unlimited undo, autosave every 30 seconds, named snapshots, a review status, and a "checked up to here" marker.
 - **Searching and output:** find and replace in a transcript or the whole project, a clean view, and Word or plain-text export, verbatim or clean.
+- **De-identification:** a name list per project, typed or pasted from a roster, with consistent replacements (P07, [Participant 3], [City]) applied across every transcript, ignoring case and keeping possessives ("Maria's" becomes "P07's"). A pass flags email addresses, phone numbers, street addresses and postcodes, dates, birth details, ID-like numbers and web addresses, written or spoken. Another lists capitalised words that may be names, using Windows' own dictionary and a project word list. Every change is logged (original, replacement, file, time in the recording, when, who) in a key file kept apart from the transcripts and never exported, and a final check refuses a de-identified export while any name on the list is left.
+- **Privacy:** optional password protection of the transcripts and the key file (Argon2id and XChaCha20-Poly1305, from RustCrypto), the Offline switch, and a one-page data handling statement for ethics protocols, written from the project's actual set-up.
 
-Edited words keep their times (T5). De-identification is phase 4. There is no installer yet. The plan is in the
+Edited words keep their times (T5). The PrismQDA hand-off, the other export formats and the batch queue are phase 5.
+There is no installer yet. The plan is in the
 specification (six phases, requirements T1 to T8); phase 0's measurements are in
 [docs/PHASE0-RESULTS.md](docs/PHASE0-RESULTS.md). What only a person can check is in
 [TESTING-TODO.md](TESTING-TODO.md).
@@ -25,10 +28,10 @@ specification (six phases, requirements T1 to T8); phase 0's measurements are in
 
 | Folder | What it holds |
 |---|---|
-| `crates/core` | The transcript data model (JSON, schema version 1), projects (one folder each), the editing rules (word times kept through edits, notation, find and replace, the clean view, speakers: merge, split, reassign) and the Word and text exports. |
+| `crates/core` | The transcript data model (JSON, schema version 1), projects (one folder each), the editing rules (word times kept through edits, notation, find and replace, the clean view, speakers: merge, split, reassign), de-identification (name map, pattern and suggestion passes, audit log, key file, final check), password protection, and the Word and text exports. |
 | `crates/media` | Decoding: WAV, MP3, M4A, FLAC and OGG in Rust; video and other formats through an FFmpeg program if one is found. Writes the 16 kHz mono copy the speech engine reads, or one per track or channel. |
 | `crates/speech` | The speech engine adapter (C5): detect voice, recognize speech, label speakers, behind one small contract, with sherpa-onnx as the first plugin and whisper.cpp (a separate program) as the second; the resumable transcription job; one microphone per person (bleed and crosstalk); the model manager (download with SHA-256 checks, offline zip). Written to move into the shared core unchanged (see [CORE-REQUESTS.md](CORE-REQUESTS.md)). |
-| `crates/engine` | Import, transcribe and export joined up, for the app and for `prism-transcribe-cli`. |
+| `crates/engine` | Import, transcribe, de-identify and export joined up, for the app and for `prism-transcribe-cli`; Windows' spell checker for the suggestions pass; the data handling statement. |
 | `crates/bench` | `bench.exe`: phase 0's benchmark; speed, memory and, with a truth file, accuracy. |
 | `app` | The desktop app: `app/ui` (React and React Aria, built by Vite) inside a Tauri window (`app/src-tauri`). |
 | `fixtures` | Two one-minute test recordings with their truth files (who spoke, when, what). Made with computer voices by `tools/make_fixtures.py`; the names, email and phone number in them are invented. |
@@ -67,14 +70,22 @@ prism-transcribe-cli run interview.m4a --out interview.docx --speakers 2 --label
 ```
 
 Also `models status|import-zip|export-zip` (add `heavy` for the heavy pack: `models install heavy`), `new`, `import`
-(with `--pack heavy-1` or `--tracks channels|tracks`), `transcribe` and `export`; run it with no arguments for the
-list.
+(with `--pack heavy-1` or `--tracks channels|tracks`), `transcribe`, `export` (with `--deidentified`, refused while a
+name from the key file's list is left), `check` (the final check) and `statement` (the data handling statement); run
+it with no arguments for the list. A password-protected project asks for its password on standard input.
 
 ## Privacy
 
 The program's only network call is the speech-model download, which happens only when the user starts it, from fixed
 addresses, with a SHA-256 check; the Offline switch in Settings blocks it before any connection is made. There is no
 telemetry. Temporary audio lives in the project's `temp` folder and is deleted when a job ends.
+
+De-identification keeps its name map and change log in a key file (`.prismkey`) that the user saves outside the
+project folder; the app remembers where it is in its own settings, not in the project. Password protection (Privacy,
+off by default) seals each transcript and the key file with XChaCha20-Poly1305 under a key made from the password
+with Argon2id; the password is stored nowhere, so a lost password means the transcripts cannot be opened. Recordings,
+waveforms and the temporary audio of a running job are not sealed, which is why the data handling statement (Privacy,
+"Save as Word") recommends full-disk encryption either way.
 
 ## Licence
 
