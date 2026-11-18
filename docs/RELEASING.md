@@ -5,10 +5,10 @@ The first release is 0.1.0-alpha.1. With a pre-release suffix it is shown in Pri
 
 ## In this repository
 
-1. **Licences.** `python tools/third_party.py --check` must pass. It flags symphonia (the audio decoder, MPL-2.0,
-   used unchanged) and names the MPL-2.0 crates Tauri's window needs (cssparser, cssparser-macros, dtoa-short,
-   option-ext, selectors). Prism Survey accepted the window's five by name; for Prism Transcribe both groups need
-   Jason's word, then they go in `EXCEPTIONS` in the script and `python tools/third_party.py` writes THIRD-PARTY.md.
+1. **Licences.** `python tools/third_party.py --check` must pass. Every licence is permissive except two MPL-2.0
+   groups, used unchanged and accepted by name on 2026-11-17, as for Prism Survey: the five crates Tauri's window
+   needs (cssparser, cssparser-macros, dtoa-short, option-ext, selectors) and symphonia, the audio decoder. A new
+   non-permissive licence stops the build until it is decided.
 2. **Commit and tag.** Commit everything, then tag that commit `v0.1.0-alpha.1` (the version in Cargo.toml,
    tauri.conf.json and app/ui/package.json). A pushed tag never moves; a rebuilt release takes a new version.
 3. **Build.** `app\BUILD-INSTALLER.ps1 -Sign -Whisper <whisper-cli folder>` on Jason's computer, after `az login`

@@ -27,10 +27,16 @@ PERMISSIVE = {
     "bzip2-1.0.6", "CDLA-Permissive-2.0",
 }
 OWN = re.compile(r"^prism-transcribe")
-# MPL-2.0 crates that Tauri's window needs, used unchanged: the same exception Jason accepted by name for Prism Survey
-# (its docs/DECISIONS.md 55). Listed here so the check names them; they still need his word for this app (README,
-# "Releasing").
-EXCEPTIONS = {("cssparser", "MPL-2.0"), ("cssparser-macros", "MPL-2.0"), ("dtoa-short", "MPL-2.0"), ("selectors", "MPL-2.0"), ("option-ext", "MPL-2.0")}
+# Accepted by name for Prism Transcribe (Jason, 2026-11-17), as for Prism Survey (its docs/DECISIONS.md 55): MPL-2.0
+# crates used unchanged, which asks only that changes to those files be shared. The five Tauri's window needs, and
+# symphonia, the audio decoder (crates/media).
+WINDOW_MPL = ["cssparser", "cssparser-macros", "dtoa-short", "selectors", "option-ext"]
+DECODER_MPL = [
+    "symphonia", "symphonia-bundle-flac", "symphonia-bundle-mp3", "symphonia-codec-aac", "symphonia-codec-adpcm",
+    "symphonia-codec-pcm", "symphonia-codec-vorbis", "symphonia-common", "symphonia-core", "symphonia-format-isomp4",
+    "symphonia-format-ogg", "symphonia-format-riff", "symphonia-metadata",
+]
+EXCEPTIONS = {(n, "MPL-2.0") for n in WINDOW_MPL + DECODER_MPL}
 
 
 def permissive(expr):
@@ -108,7 +114,7 @@ def main():
         "",
         "Everything built into Prism Transcribe that others wrote, each with its license as its authors publish it. Where a component offers a choice, Prism Transcribe uses it under the MIT or Apache 2.0 terms. Test-only and build-tool components that do not ship are not listed. This file is written by `python tools/third_party.py`, which also checks that every license is permissive. The speech models are listed in NOTICE and docs/MODELS.md.",
         "",
-        f"One exception to the permissive rule, by name: crates the window needs ({', '.join(excepted)}) are under MPL-2.0, which asks only that changes to those files be shared. Prism Transcribe uses them unchanged; their source is at crates.io." if excepted else "",
+        "One exception to the permissive rule, by name: the crates Tauri's window needs (" + ", ".join(n for n in excepted if n in WINDOW_MPL) + ") and the symphonia audio decoder (" + ", ".join(n for n in excepted if n in DECODER_MPL) + ") are under MPL-2.0, which asks only that changes to those files be shared. Prism Transcribe uses them unchanged; their source is at crates.io." if excepted else "",
         "",
         "sherpa-onnx and ONNX Runtime are linked into the program (Apache 2.0 and MIT; see NOTICE). The de-identification suggestions use the spell checker built into Windows, called through the `windows` crate; nothing is bundled for it. The window is drawn by the web view built into Windows; the installer fetches it only if the computer lacks it.",
         "",

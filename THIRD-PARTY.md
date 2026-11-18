@@ -2,7 +2,7 @@
 
 Everything built into Prism Transcribe that others wrote, each with its license as its authors publish it. Where a component offers a choice, Prism Transcribe uses it under the MIT or Apache 2.0 terms. Test-only and build-tool components that do not ship are not listed. This file is written by `python tools/third_party.py`, which also checks that every license is permissive. The speech models are listed in NOTICE and docs/MODELS.md.
 
-One exception to the permissive rule, by name: crates the window needs (cssparser, cssparser-macros, dtoa-short, option-ext, selectors) are under MPL-2.0, which asks only that changes to those files be shared. Prism Transcribe uses them unchanged; their source is at crates.io.
+One exception to the permissive rule, by name: the crates Tauri's window needs (cssparser, cssparser-macros, dtoa-short, option-ext, selectors) and the symphonia audio decoder (symphonia, symphonia-bundle-flac, symphonia-bundle-mp3, symphonia-codec-aac, symphonia-codec-adpcm, symphonia-codec-pcm, symphonia-codec-vorbis, symphonia-common, symphonia-core, symphonia-format-isomp4, symphonia-format-ogg, symphonia-format-riff, symphonia-metadata) are under MPL-2.0, which asks only that changes to those files be shared. Prism Transcribe uses them unchanged; their source is at crates.io.
 
 sherpa-onnx and ONNX Runtime are linked into the program (Apache 2.0 and MIT; see NOTICE). The de-identification suggestions use the spell checker built into Windows, called through the `windows` crate; nothing is bundled for it. The window is drawn by the web view built into Windows; the installer fetches it only if the computer lacks it.
 
