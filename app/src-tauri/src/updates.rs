@@ -169,6 +169,11 @@ mod tests {
 
     /// A feed on this computer: `/latest.json` announces `version` with the fixture's signature, and `/setup.exe` gives `bytes`.
     fn serve(version: &'static str, bytes: &'static [u8], status_for_feed: u16) -> Server {
+        serve_signed(version, bytes.to_vec(), SIGNATURE.trim().to_string(), status_for_feed)
+    }
+
+    /// The same, for a file and a signature given at run time (a setup that was really built).
+    fn serve_signed(version: &str, bytes: Vec<u8>, signature: String, status_for_feed: u16) -> Server {
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let base = format!("http://127.0.0.1:{}", server.server_addr().to_ip().unwrap().port());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -177,7 +182,7 @@ mod tests {
             "version": version,
             "notes": "Fixes for the test.",
             "pub_date": "2026-11-18T12:00:00Z",
-            "platforms": { "windows-x86_64": { "signature": SIGNATURE.trim(), "url": format!("{base}/setup.exe") } },
+            "platforms": { "windows-x86_64": { "signature": signature, "url": format!("{base}/setup.exe") } },
         })
         .to_string();
         std::thread::spawn(move || {
@@ -187,7 +192,7 @@ mod tests {
                 let response = if url == "/latest.json" && status_for_feed == 200 {
                     tiny_http::Response::from_string(manifest.clone()).with_header("Content-Type: application/json".parse::<tiny_http::Header>().unwrap()).boxed()
                 } else if url == "/setup.exe" {
-                    tiny_http::Response::from_data(bytes.to_vec()).boxed()
+                    tiny_http::Response::from_data(bytes.clone()).boxed()
                 } else {
                     tiny_http::Response::from_string("not here").with_status_code(status_for_feed.max(404)).boxed()
                 };
@@ -261,5 +266,34 @@ mod tests {
         assert!(block_on(update.download(|_, _| {}, || {})).is_err(), "a changed byte is refused");
         let update = block_on(check_update(app.handle(), &feed(&good, OTHER_PUB))).unwrap().expect("announced");
         assert!(block_on(update.download(|_, _| {}, || {})).is_err(), "another key's signature is refused");
+    }
+
+    /// Run by hand on a release built with `app\BUILD-INSTALLER.ps1 -Sign -Updates`, in a build whose `PUBKEY` is the key that signed it:
+    /// `PRISM_REAL_SETUP_DIR=<target\release-assets> cargo test -p prism-transcribe-app real_built -- --ignored`. The real, Azure-signed
+    /// setup must pass its update signature with the key built into this program, and the same file with one byte changed must not.
+    #[test]
+    #[ignore = "needs a setup built with -Updates; set PRISM_REAL_SETUP_DIR to its folder"]
+    fn a_real_built_setup_passes_its_update_signature_and_a_changed_byte_does_not() {
+        let Some(dir) = std::env::var_os("PRISM_REAL_SETUP_DIR") else { return };
+        assert!(!PUBKEY.is_empty(), "this build has no public key to check with");
+        let dir = std::path::PathBuf::from(dir);
+        let manifest: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("latest.json")).unwrap()).unwrap();
+        let platform = &manifest["platforms"]["windows-x86_64"];
+        let signature = platform["signature"].as_str().unwrap().to_string();
+        let name = platform["url"].as_str().unwrap().rsplit('/').next().unwrap().to_string();
+        let bytes = std::fs::read(dir.join(&name)).unwrap();
+        let app = app();
+        let built_in = |s: &Server| Feed { endpoint: format!("{}/latest.json", s.base), pubkey: PUBKEY.to_string() };
+
+        let good = serve_signed("99.0.0", bytes.clone(), signature.clone(), 200);
+        let update = block_on(check_update(app.handle(), &built_in(&good))).unwrap().expect("a newer version");
+        assert_eq!(block_on(update.download(|_, _| {}, || {})).expect("the built setup passes its signature"), bytes);
+
+        let mut changed = bytes;
+        let middle = changed.len() / 2;
+        changed[middle] ^= 1;
+        let bad = serve_signed("99.0.0", changed, signature, 200);
+        let update = block_on(check_update(app.handle(), &built_in(&bad))).unwrap().expect("announced");
+        assert!(block_on(update.download(|_, _| {}, || {})).is_err(), "one changed byte is refused");
     }
 }

@@ -88,6 +88,21 @@ if ($Updates) {
     if (-not $built) { throw 'PUBKEY in app\src-tauri\src\updates.rs is empty, so the program would not check for updates at all (tools\make-update-key.ps1 puts it there)' }
     if ($built -ne (Get-Content "$updateKey.pub" -Raw).Trim()) { throw 'PUBKEY in updates.rs is not the public half of the update key; a program built like that would refuse every update' }
     if ($NotesFile -and -not (Test-Path $NotesFile)) { throw "the notes file $NotesFile is not there" }
+    if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+        # Asked here, hidden, and kept only in this build's process: a password typed on a command line can be read by
+        # other programs.
+        $secure = Read-Host -AsSecureString 'Password of the update key'
+        $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [System.Net.NetworkCredential]::new('', $secure).Password
+        if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { throw 'no password was given for the update key' }
+    }
+    # Try the key and password now, on a scratch file, rather than after the whole build.
+    $probe = Join-Path ([System.IO.Path]::GetTempPath()) ("prism-transcribe-keycheck-" + [guid]::NewGuid().ToString('N') + '.txt')
+    'key check' | Out-File -Encoding ascii $probe
+    node (Join-Path $app 'ui\node_modules\@tauri-apps\cli\tauri.js') signer sign -f $updateKey $probe *> $null
+    $ok = ($LASTEXITCODE -eq 0) -and (Test-Path "$probe.sig")
+    Remove-Item -Force -ErrorAction SilentlyContinue $probe, "$probe.sig"
+    if (-not $ok) { throw 'the update key could not sign with that password (wrong password?); nothing was built' }
+    'Update key and password: ok'
 }
 
 $work = Join-Path $root 'target\installer-work'

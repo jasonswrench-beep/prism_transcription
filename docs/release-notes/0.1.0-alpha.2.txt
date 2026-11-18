@@ -1,0 +1,7 @@
+Prism Transcribe 0.1.0 alpha 2, a preview for testing.
+
+New: a Help button (or F1) with getting started, the editor's keys as they are set, privacy in brief and the version.
+
+New: Check for updates, in Settings and in Help. It asks once when pressed, never on its own, and is off while Offline is on. An update is installed only after you agree, and only if its signature matches the key built into Prism Transcribe. From this version on, newer versions can be installed this way.
+
+Everything else is as in 0.1.0 alpha 1. Keep your original recordings, and check transcripts against them before relying on them.
