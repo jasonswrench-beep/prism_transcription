@@ -150,6 +150,17 @@ fn media_update(state: State<AppState>, id: String, fields: ImportFields) -> Res
     view(&dir, false)
 }
 
+/// Take a recording with no transcript out of the project (a failed import). The recording itself is not touched.
+#[tauri::command]
+fn media_remove(state: State<AppState>, id: String) -> Res<ProjectView> {
+    let dir = current(&state)?;
+    if state.busy.lock().unwrap().as_ref().is_some_and(|(running, _)| *running == id) {
+        return Err("This recording is being transcribed; cancel that first.".into());
+    }
+    Project::remove_media(&dir, &id).map_err(err)?;
+    view(&dir, false)
+}
+
 #[derive(Clone, Serialize)]
 struct JobEvent {
     id: String,
@@ -364,6 +375,8 @@ struct EditorInfo {
     notation: Vec<String>,
     hotkeys: std::collections::BTreeMap<String, String>,
     rewind_on_resume: f64,
+    /// Where the recording should be, when it is not there: the transcript opens, and the editor says so.
+    missing: Option<String>,
 }
 
 #[tauri::command]
@@ -373,6 +386,8 @@ fn editor_info(state: State<AppState>, id: String) -> Res<EditorInfo> {
     let (path, copy) = engine::playback_file(&dir, &id, &settings).map_err(err)?;
     let p = Project::open(&dir).map_err(err)?;
     let m = p.media(&id).map_err(err)?;
+    let original = p.media_path(m);
+    let missing = (!original.is_file()).then(|| original.display().to_string().trim_start_matches(r"\\?\").to_string());
     // A version number in the address, so a different project's F001 is never served from the player's cache.
     let stamp = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
     Ok(EditorInfo {
@@ -384,6 +399,7 @@ fn editor_info(state: State<AppState>, id: String) -> Res<EditorInfo> {
         notation: p.file.notation.clone(),
         hotkeys: settings.effective_hotkeys(),
         rewind_on_resume: settings.rewind(),
+        missing,
     })
 }
 
@@ -423,7 +439,7 @@ fn replace_in_project(state: State<AppState>, find: String, replace: String, opt
 
 #[tauri::command]
 fn notation_set(state: State<AppState>, list: Vec<String>) -> Res<Vec<String>> {
-    let list: Vec<String> = list.into_iter().map(|s| s.trim().to_string()).filter(|s| s.starts_with('[') && s.ends_with(']')).collect();
+    let list = engine::notation_list(&list);
     Project::update(&current(&state)?, |p| {
         p.file.notation = list.clone();
         Ok(())
@@ -947,6 +963,7 @@ fn main() {
             project_clean_up,
             media_import,
             media_update,
+            media_remove,
             transcribe,
             cancel,
             transcript,

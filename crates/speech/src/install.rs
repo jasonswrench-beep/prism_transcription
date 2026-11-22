@@ -22,7 +22,7 @@ pub enum InstallError {
     TooLarge { file: String, bytes: u64 },
     #[error("the offline zip is missing {0}")]
     ZipMissing(String),
-    #[error("the zip could not be read: {0}")]
+    #[error("the file could not be read as a zip: it may be damaged, or not a zip file")]
     Zip(String),
     #[error("the install was cancelled")]
     Cancelled,

@@ -1,6 +1,6 @@
 // The media pane (T4): the recording (with its picture when it has one), a waveform that follows the playhead, an
 // overview of the whole file with the speakers' colour band (T3) and how far it has been checked, and the transport.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import type { EditorInfo, Turn } from '../api';
 import { hms } from '../format';
@@ -56,6 +56,7 @@ export function MediaPane(props: {
   keyLabel: (action: string) => string;
 }) {
   const { info, peaks, player } = props;
+  const [playError, setPlayError] = useState(false);
   const pps = info.peaks_per_second;
   const duration = Math.max(info.duration, 0.1);
 
@@ -129,7 +130,20 @@ export function MediaPane(props: {
         preload="auto"
         className={info.has_video ? 'video' : 'audio-only'}
         aria-label={info.has_video ? 'Video of the recording' : undefined}
+        onError={() => setPlayError(true)}
       />
+      {info.missing ? (
+        <p className="warning" role="alert">
+          The recording is not where it was imported from (<span className="path">{info.missing}</span>), so it cannot be played. Put it back there and open
+          the transcript again. The words can still be edited and exported.
+        </p>
+      ) : (
+        playError && (
+          <p className="warning" role="alert">
+            This recording could not be played. The words can still be edited and exported.
+          </p>
+        )
+      )}
       {info.playback_copy && <p className="hint">Playing a sound-only copy: this file type cannot be played directly.</p>}
       <canvas ref={wave} className="wave" onClick={(e) => seekFromCanvas(e, false)} aria-hidden="true" />
       <canvas ref={overview} className="overview" onClick={(e) => seekFromCanvas(e, true)} aria-hidden="true" />

@@ -3,6 +3,7 @@
 // The queue lives in the project file, so it survives a restart; each file carries on from its last finished chunk.
 import { Button, GridList, GridListItem, useDragAndDrop } from 'react-aria-components';
 import { api, type MediaFile, type Queue, type QueueItem, type QueueSummary } from './api';
+import { errorText } from './format';
 
 const STATE_WORDS: Record<QueueItem['state'], string> = {
   waiting: 'Waiting',
@@ -14,7 +15,7 @@ const STATE_WORDS: Record<QueueItem['state'], string> = {
 };
 
 function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 export function QueuePanel(props: {

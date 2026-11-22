@@ -1,7 +1,7 @@
 // The speakers panel (T3): rename a speaker once and every turn follows; role and attributes (they travel to PrismQDA
 // as case attributes); merge two speakers; add one; remove one who has no turns left; and find the speakers again
 // with another expected count, keeping every word as it is.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Dialog, Group, Heading, Input, Label, Modal, ModalOverlay, NumberField, TextField } from 'react-aria-components';
 import type { Role, Speaker, SpeakerStats } from '../api';
 
@@ -149,6 +149,9 @@ export function SpeakersDialog(props: {
 }) {
   const [count, setCount] = useState<number>(props.expected ?? NaN);
   const [finding, setFinding] = useState(false);
+  // The button is disabled while it works, which takes the focus off it: put the focus back when it is done, so the
+  // keyboard (and Escape) carry on inside the window.
+  const findButton = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (props.isOpen) setCount(props.expected ?? NaN);
   }, [props.isOpen, props.expected]);
@@ -195,6 +198,7 @@ export function SpeakersDialog(props: {
                   <Input />
                 </NumberField>
                 <Button
+                  ref={findButton}
                   isDisabled={finding}
                   onPress={async () => {
                     setFinding(true);
@@ -202,6 +206,7 @@ export function SpeakersDialog(props: {
                       await props.onFindAgain(Number.isFinite(count) ? count : null);
                     } finally {
                       setFinding(false);
+                      requestAnimationFrame(() => findButton.current?.focus());
                     }
                   }}
                 >

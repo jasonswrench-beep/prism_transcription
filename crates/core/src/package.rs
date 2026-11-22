@@ -12,7 +12,9 @@
 //!
 //! Snapshots are left out because they keep the words from before de-identification. The media is referenced, not
 //! copied: its absolute path, size, duration, SHA-256, and PrismQDA's own fingerprint (SHA-256 of the size as 8
-//! little-endian bytes, the first MiB and the last MiB), so the recording can be found again if it moves.
+//! little-endian bytes, the first MiB and the last MiB), so the recording can be found again if it moves. A package
+//! marked de-identified leaves out the path and gives the file name as the recording's id ("F001.wav"): a file or
+//! folder name often holds a participant's or a site's name. The checksums still find the recording.
 //!
 //! **.qdpx** follows REFI-QDA 1.0: `project.qde` with one `AudioSource` or `VideoSource` per recording, its
 //! `Transcript` (plain text in `sources/`, a `SyncPoint` at the start and end of every turn, a `TranscriptSelection`
@@ -66,6 +68,14 @@ fn speaker_name(t: &Transcript, id: &str) -> String {
     t.speaker(id).map(|s| s.display_name().to_string()).unwrap_or_else(|| id.to_string())
 }
 
+/// The name a de-identified package gives a recording: its id and its file ending, nothing from its real name.
+fn neutral_name(m: &MediaFile, path: &Path) -> String {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(e) => format!("{}.{}", m.id, e.to_ascii_lowercase()),
+        None => m.id.clone(),
+    }
+}
+
 fn kind_of(m: &MediaFile) -> &'static str {
     if m.has_video {
         "video"
@@ -107,9 +117,11 @@ struct ManifestDoc {
 #[derive(Serialize)]
 struct MediaRef {
     kind: &'static str,
+    /// The recording's file name, or its id and file ending ("F001.wav") in a de-identified package.
     file_name: String,
-    /// Absolute path when it was packaged.
-    path: String,
+    /// Absolute path when it was packaged; left out of a de-identified package.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
     size_bytes: u64,
     duration_ms: i64,
     sha256: String,
@@ -186,8 +198,8 @@ pub fn to_prismtx(docs: &[Doc], deidentified: bool, app_version: &str) -> std::i
             language: d.media.fields.language.as_deref(),
             media: MediaRef {
                 kind: kind_of(d.media),
-                file_name: d.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-                path: d.path.display().to_string().trim_start_matches(r"\\?\").to_string(),
+                file_name: if deidentified { neutral_name(d.media, &d.path) } else { d.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() },
+                path: (!deidentified).then(|| d.path.display().to_string().trim_start_matches(r"\\?\").to_string()),
                 size_bytes: size,
                 duration_ms: ms(d.media.duration),
                 sha256: d.media.sha256.clone(),
@@ -259,7 +271,9 @@ fn absolute_uri(p: &Path) -> String {
     format!("absolute://{}", p.display().to_string().trim_start_matches(r"\\?\").replace('\\', "/"))
 }
 
-pub fn to_qdpx(project_name: &str, docs: &[Doc], app_version: &str) -> std::io::Result<Vec<u8>> {
+/// A REFI-QDA project. Marked `deidentified`, each recording is linked as `relative://F001.wav` (its id and file
+/// ending) instead of its absolute path, which would name its folder and file.
+pub fn to_qdpx(project_name: &str, docs: &[Doc], deidentified: bool, app_version: &str) -> std::io::Result<Vec<u8>> {
     let user = guid();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let mut texts: Vec<(String, String)> = Vec::new();
@@ -312,7 +326,7 @@ pub fn to_qdpx(project_name: &str, docs: &[Doc], app_version: &str) -> std::io::
         sources.push_str(&format!(
             r#"<{element} guid="{sguid}" name="{}" path="{}" creatingUser="{user}" creationDateTime="{now}"><Transcript guid="{tguid}" name="{}" plainTextPath="internal://{tguid}.txt" creatingUser="{user}" creationDateTime="{now}">{sync}{selections}</Transcript></{element}>"#,
             x(&d.media.fields.label),
-            x(&absolute_uri(&d.path)),
+            x(&if deidentified { format!("relative://{}", neutral_name(d.media, &d.path)) } else { absolute_uri(&d.path) }),
             x(&format!("{} transcript", d.media.fields.label)),
         ));
         texts.push((format!("sources/{tguid}.txt"), text));
@@ -425,12 +439,29 @@ mod tests {
         assert_eq!(doc["cases"][1]["attributes"][1]["value"], "North & co");
         assert_eq!(doc["turns_ms"][1], serde_json::json!(["S2", 2500, 3400]));
         assert!(read(&bytes, "F001/transcript.vtt").contains("<v P07>Hi café."));
+        assert_eq!(doc["media"]["file_name"], "F001.wav", "a de-identified package does not name the recording's file");
+        assert!(doc["media"].get("path").is_none(), "nor its folder");
+        assert!(!bytes.windows(6).any(|w| w == b"int 07"));
+
+        let plain = to_prismtx(&[Doc { media: &m, transcript: &t, path: PathBuf::from(&m.source) }], false, "0.1.0").unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&read(&plain, "F001/document.json")).unwrap();
+        assert_eq!(doc["media"]["file_name"], "int 07.wav");
+        assert!(doc["media"]["path"].as_str().unwrap().ends_with("int 07.wav"));
+    }
+
+    #[test]
+    fn a_deidentified_qdpx_links_the_recording_without_its_path() {
+        let (m, t, _tmp) = doc_parts();
+        let bytes = to_qdpx("Study A", &[Doc { media: &m, transcript: &t, path: PathBuf::from(&m.source) }], true, "0.1.0").unwrap();
+        let qde = read(&bytes, "project.qde");
+        assert!(qde.contains(r#"path="relative://F001.wav""#), "{qde}");
+        assert!(!qde.contains("absolute://") && !qde.contains("int 07"));
     }
 
     #[test]
     fn qdpx_follows_refi_qda() {
         let (m, t, _tmp) = doc_parts();
-        let bytes = to_qdpx("Study A", &[Doc { media: &m, transcript: &t, path: PathBuf::from(&m.source) }], "0.1.0").unwrap();
+        let bytes = to_qdpx("Study A", &[Doc { media: &m, transcript: &t, path: PathBuf::from(&m.source) }], false, "0.1.0").unwrap();
         let qde = read(&bytes, "project.qde");
         assert!(qde.starts_with(r#"<?xml version="1.0" encoding="utf-8"?><Project xmlns="urn:QDA-XML:project:1.0" name="Study A""#));
         assert!(qde.contains("<AudioSource ") && qde.contains("path=\"absolute://"));

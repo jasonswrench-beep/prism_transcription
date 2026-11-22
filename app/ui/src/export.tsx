@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Button, Checkbox, Dialog, Heading, Label, Modal, ModalOverlay, Radio, RadioGroup } from 'react-aria-components';
 import { save } from '@tauri-apps/plugin-dialog';
 import { api, type ExportCheck, type ExportOptions, type MediaFile } from './api';
+import { errorText } from './format';
 
 export type ExportKind = 'docx' | 'txt' | 'srt' | 'vtt' | 'csv' | 'xlsx' | 'prismtx' | 'qdpx';
 
@@ -20,7 +21,7 @@ const KINDS: { kind: ExportKind; label: string; filter: string; many: boolean }[
 ];
 
 function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 /** `files` is one recording (its Export button) or every transcribed one (Export all). */

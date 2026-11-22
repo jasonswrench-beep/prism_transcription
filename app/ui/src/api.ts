@@ -124,6 +124,8 @@ export interface EditorInfo {
   notation: string[];
   hotkeys: Record<string, string>;
   rewind_on_resume: number;
+  /** Where the recording should be, when it is not there. */
+  missing?: string | null;
 }
 
 export type Progress =
@@ -326,6 +328,7 @@ export const api = {
   cleanUp: () => invoke<number>('project_clean_up'),
   importMedia: (paths: string[], fields: ImportFields, copy: boolean) => invoke<void>('media_import', { paths, fields, copy }),
   updateMedia: (id: string, fields: ImportFields) => invoke<ProjectView>('media_update', { id, fields }),
+  removeMedia: (id: string) => invoke<ProjectView>('media_remove', { id }),
   transcribe: (id: string) => invoke<void>('transcribe', { id }),
   cancel: () => invoke<void>('cancel'),
   transcript: (id: string) => invoke<Transcript | null>('transcript', { id }),
@@ -382,7 +385,8 @@ export const api = {
   replaceInProject: (find: string, replace: string, options: { whole_word: boolean; match_case: boolean }) =>
     invoke<[string, number][]>('replace_in_project', { find, replace, options }),
   setNotation: (list: string[]) => invoke<string[]>('notation_set', { list }),
-  setHotkeys: (hotkeys: Record<string, string>, rewind_on_resume: number) => invoke<Record<string, string>>('hotkeys_set', { hotkeys, rewind_on_resume }),
+  // Tauri takes a command's arguments in camelCase: rewind_on_resume in Rust is rewindOnResume here.
+  setHotkeys: (hotkeys: Record<string, string>, rewindOnResume: number) => invoke<Record<string, string>>('hotkeys_set', { hotkeys, rewindOnResume }),
   defaultHotkeys: () => invoke<Record<string, string>>('hotkeys_default'),
   settings: () => invoke<Settings>('settings_get'),
   saveSettings: (settings: Settings) => invoke<Settings>('settings_set', { settings }),

@@ -102,6 +102,30 @@ fn looks_like_replacement(s: &str) -> bool {
     s.starts_with('[') || (s.chars().any(|c| c.is_ascii_digit()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
+/// "Lopez, Maria" is Maria Lopez; a name without a comma stays as it is.
+fn surname_last(name: &str) -> String {
+    match name.split_once(',') {
+        Some((last, first)) if !first.trim().is_empty() && !first.contains(',') => format!("{} {}", first.trim(), last.trim()),
+        _ => name.trim().to_string(),
+    }
+}
+
+/// What follows a name: "P07", "P07, person", "[College] organisation", "person". A kind written after the
+/// replacement, with or without a comma, is the kind, not part of the replacement.
+fn split_rest(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in s.split([',', ';']).map(str::trim).filter(|p| !p.is_empty()) {
+        match part.rsplit_once(char::is_whitespace) {
+            Some((head, last)) if kind_from(last).is_some() && !head.trim().is_empty() => {
+                out.push(head.trim().to_string());
+                out.push(last.to_string());
+            }
+            _ => out.push(part.to_string()),
+        }
+    }
+    out
+}
+
 /// Entries from a pasted roster, one per line: "Maria Lopez", "Maria Lopez<TAB>P07", "Maria Lopez = P07",
 /// "Maria Lopez -> P07", "Maria Lopez, P07", "Lopez, Maria", with an optional third column naming the kind
 /// (person, place, organisation). Names already in `existing` (ignoring case) are left out.
@@ -112,21 +136,26 @@ pub fn parse_roster(text: &str, existing: &[NameEntry]) -> Vec<NameEntry> {
         if line.is_empty() {
             continue;
         }
-        let cols: Vec<String> = if line.contains('\t') {
-            line.split('\t').map(|c| c.trim().to_string()).collect()
+        // The name, and what follows it (the replacement and the kind, in either order).
+        let (left, rest): (String, Vec<String>) = if line.contains('\t') {
+            let mut it = line.split('\t').map(|c| c.trim().to_string());
+            (it.next().unwrap_or_default(), it.flat_map(|c| split_rest(&c)).collect())
         } else if let Some(sep) = ["=>", "->", "\u{2192}", "="].iter().find(|s| line.contains(**s)) {
-            line.splitn(2, *sep).map(|c| c.trim().to_string()).flat_map(|c| c.split(',').map(|x| x.trim().to_string()).collect::<Vec<_>>()).collect()
+            let mut it = line.splitn(2, *sep);
+            (it.next().unwrap_or("").trim().to_string(), split_rest(it.next().unwrap_or("")))
         } else if line.contains(',') || line.contains(';') {
             let parts: Vec<String> = line.split([',', ';']).map(|c| c.trim().to_string()).collect();
-            if parts.len() == 2 && !looks_like_replacement(&parts[1]) && kind_from(&parts[1]).is_none() {
-                // "Lopez, Maria": surname first.
-                vec![format!("{} {}", parts[1], parts[0])]
+            let is_name = |s: &String| !looks_like_replacement(s) && kind_from(s).is_none();
+            if parts.len() >= 2 && is_name(&parts[1]) {
+                // "Lopez, Maria" and "Lopez, Maria, P07": surname first.
+                (format!("{}, {}", parts[0], parts[1]), parts[2..].iter().flat_map(|c| split_rest(c)).collect())
             } else {
-                parts
+                (parts[0].clone(), parts[1..].iter().flat_map(|c| split_rest(c)).collect())
             }
         } else {
-            vec![line.to_string()]
+            (line.to_string(), Vec::new())
         };
+        let cols: Vec<String> = std::iter::once(surname_last(&left)).chain(rest.into_iter().filter(|c| !c.is_empty())).collect();
         let real = cols[0].trim().to_string();
         if real.is_empty() || existing.iter().chain(&out).any(|n| n.real.eq_ignore_ascii_case(&real)) {
             continue;
@@ -160,19 +189,79 @@ fn terms(names: &[NameEntry]) -> Vec<(String, usize)> {
     t
 }
 
-/// Where names on the list occur in `text`: (start, end, entry), not overlapping, in order.
+/// A name that is part of an address ("Riverside.edu", "maria.lopez@...", "riverside.org/staff"): the whole address,
+/// without the sentence's own punctuation around it, so no half-replaced address is left behind.
+fn address_around(text: &str, s: usize, e: usize) -> Option<(usize, usize)> {
+    let joins = |mut it: std::str::Chars| matches!((it.next(), it.next()), (Some('.' | '@' | '/'), Some(c)) if c.is_alphanumeric());
+    let joined_after = joins(text[e..].chars());
+    let mut back = text[..s].chars().rev();
+    let joined_before = matches!((back.next(), back.next()), (Some('.' | '@' | '/'), Some(c)) if c.is_alphanumeric());
+    if !joined_after && !joined_before {
+        return None;
+    }
+    let mut ts = text[..s].char_indices().rev().find(|(_, c)| c.is_whitespace()).map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
+    let mut te = text[e..].char_indices().find(|(_, c)| c.is_whitespace()).map(|(i, _)| e + i).unwrap_or(text.len());
+    while let Some(c) = text[..te].chars().last().filter(|c| te > e && ".,;:!?)\"'\u{201d}\u{2019}".contains(*c)) {
+        te -= c.len_utf8();
+    }
+    while let Some(c) = text[ts..].chars().next().filter(|c| ts < s && "(\"'\u{201c}\u{2018}".contains(*c)) {
+        ts += c.len_utf8();
+    }
+    Some((ts, te))
+}
+
+/// A person's initial just before the name ("D Okafor", "D. Okafor"): where it starts, so it goes with the name.
+fn initial_before(text: &str, s: usize) -> Option<usize> {
+    let b = text[..s].strip_suffix(' ')?;
+    let b = b.strip_suffix('.').unwrap_or(b);
+    let c = b.chars().last().filter(|c| c.is_uppercase() && *c != 'I')?;
+    let start = b.len() - c.len_utf8();
+    (start == 0 || text[..start].ends_with(char::is_whitespace)).then_some(start)
+}
+
+/// Where names on the list occur in `text`: (start, end, entry), not overlapping, in order. A name inside one of
+/// the list's own replacements ("College" in "[College]") is not a name left; a name that is part of an address
+/// takes the whole address; a person's name takes an initial written before it.
 pub fn find_names(text: &str, names: &[NameEntry]) -> Vec<(usize, usize, usize)> {
     let o = FindOptions { whole_word: true, match_case: false };
+    let mut placed: Vec<(usize, usize)> = Vec::new();
+    for n in names {
+        let r = n.replacement.trim();
+        if !r.is_empty() {
+            placed.extend(text.match_indices(r).map(|(i, m)| (i, i + m.len())));
+        }
+    }
     let mut hits: Vec<(usize, usize, usize)> = Vec::new();
     for (term, i) in terms(names) {
         for (s, e) in find_in(text, &term, &o) {
+            if placed.iter().any(|&(a, b)| s < b && a < e) {
+                continue;
+            }
             if !hits.iter().any(|&(a, b, _)| s < b && a < e) {
                 hits.push((s, e, i));
             }
         }
     }
-    hits.sort();
-    hits
+    // (start, end, entry, where the name itself starts)
+    let mut grown: Vec<(usize, usize, usize, usize)> = hits
+        .into_iter()
+        .map(|(s, e, i)| match address_around(text, s, e) {
+            Some((a, b)) => (a, b, i, s),
+            None if names[i].kind == NameKind::Person => (initial_before(text, s).unwrap_or(s), e, i, s),
+            None => (s, e, i, s),
+        })
+        .collect();
+    grown.sort_by_key(|g| (g.0, g.3));
+    // An address holding two names is one replacement: the first name's.
+    let mut out: Vec<(usize, usize, usize)> = Vec::with_capacity(grown.len());
+    for (s, e, i, _) in grown {
+        let h = (s, e, i);
+        match out.last_mut() {
+            Some(last) if h.0 < last.1 => last.1 = last.1.max(h.1),
+            _ => out.push(h),
+        }
+    }
+    out
 }
 
 fn replace_ranges(text: &str, hits: &[(usize, usize, String)]) -> String {
@@ -614,7 +703,8 @@ pub fn suggestions(files: &[(&MediaFile, &Transcript)], names: &[NameEntry], wor
             let text = turn.text();
             let offs = word_offsets(turn);
             for (i, w) in turn.words.iter().enumerate() {
-                if crate::edit::is_notation(&w.text) {
+                // Notation and replacements ("[College]", "[College].edu") are not names.
+                if crate::edit::is_notation(&w.text) || w.text.contains(['[', ']']) {
                     continue;
                 }
                 let b = bare_word(&w.text);
@@ -851,6 +941,43 @@ mod tests {
         assert!(r[3].variants.is_empty(), "places get no automatic spellings");
         assert_eq!(auto_variants("Ana de Souza", NameKind::Person), ["Ana", "Souza"]);
         assert!(parse_roster("MARIA LOPEZ", &r).is_empty(), "already on the list");
+    }
+
+    /// The manual's cases (2026-11-18): surname first with a replacement, and a kind after an arrow.
+    #[test]
+    fn a_roster_with_the_surname_first_and_a_kind_after_the_replacement() {
+        let r = parse_roster("Okafor, Dana = P08\nGarcia, Ana = P21\nGarcia, Luis\tP22\nRiverside College -> [College] organisation\nNorth Clinic -> [Site], place\nKim, Jo, P23", &[]);
+        let got: Vec<(&str, &str, NameKind)> = r.iter().map(|n| (n.real.as_str(), n.replacement.as_str(), n.kind)).collect();
+        assert_eq!(
+            got,
+            [
+                ("Dana Okafor", "P08", NameKind::Person),
+                ("Ana Garcia", "P21", NameKind::Person),
+                ("Luis Garcia", "P22", NameKind::Person),
+                ("Riverside College", "[College]", NameKind::Organisation),
+                ("North Clinic", "[Site]", NameKind::Place),
+                ("Jo Kim", "P23", NameKind::Person),
+            ]
+        );
+        assert_eq!(r[0].variants, ["Dana", "Okafor"]);
+    }
+
+    /// The manual's cases: a replacement holding a word of the name is not a name left, an address goes whole, and
+    /// an initial goes with the name.
+    #[test]
+    fn names_in_addresses_initials_and_replacements() {
+        let college = NameEntry { real: "Riverside College".into(), variants: vec!["Riverside".into(), "College".into()], replacement: "[College]".into(), kind: NameKind::Organisation, source: NameSource::Typed };
+        let dana = NameEntry { real: "Dana Okafor".into(), variants: vec!["Dana".into(), "Okafor".into(), "Akafer".into()], replacement: "P08".into(), kind: NameKind::Person, source: NameSource::Typed };
+        let names = vec![college, dana];
+        let mut t = transcript(&[("S2", "Write to D Akafer at Riverside.edu, or d.okafor@riverside.edu. I teach at Riverside College."), ("S1", "Thanks, D. Okafor.")]);
+        let m = media("F001", "INT-08");
+        apply_names(&mut t, &m, &names, "jo");
+        assert_eq!(t.turns[0].text(), "Write to P08 at [College], or P08. I teach at [College].");
+        assert_eq!(t.turns[1].text(), "Thanks, P08.");
+        let c = check_file(&m, Some(&t), &names);
+        assert!(c.passes(), "[College] is the replacement, not a name left: {:?}", c.leftovers);
+        assert_eq!(find_names("I asked A Okafor and I Okafor.", &names).len(), 2);
+        assert_eq!(find_names("Ask I Okafor", &names)[0].0, 6, "I is a word, not an initial");
     }
 
     #[test]

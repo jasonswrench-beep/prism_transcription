@@ -90,7 +90,7 @@ export function NotationMenu(props: { isOpen: boolean; entries: string[]; onClos
             </>
           ) : (
             <>
-              <p className="hint">One entry per line, each in square brackets. This list belongs to the project.</p>
+              <p className="hint">One entry per line, each in square brackets; a line without them gets them when the list is saved. This list belongs to the project.</p>
               <TextField value={text} onChange={setText} aria-label="Notation entries">
                 <textarea className="react-aria-Input notation-edit" rows={8} value={text} onChange={(e) => setText(e.target.value)} />
               </TextField>

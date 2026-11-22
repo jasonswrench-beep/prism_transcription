@@ -5,6 +5,7 @@ import {
   Button,
   Checkbox,
   Dialog,
+  FieldError,
   Heading,
   Input,
   Label,
@@ -37,7 +38,7 @@ import {
   type Transcript,
   type TrackMode,
 } from './api';
-import { duration, hms, LOW_CONFIDENCE, progressText } from './format';
+import { duration, hms, LOW_CONFIDENCE, progressText, errorText, languageCode, sentence } from './format';
 import { Editor } from './editor/Editor';
 import { DeidView } from './deid';
 import { PrivacyDialog, UnlockPanel } from './privacy';
@@ -55,7 +56,7 @@ const STATUS_WORDS: Record<MediaFile['status'], string> = {
 };
 
 function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 export function App() {
@@ -111,7 +112,7 @@ export function App() {
       on<JobEvent>('job', (e) => {
         if (e.finished) {
           setJob(null);
-          if (e.error) setNotice(`Transcription failed: ${e.error}`);
+          if (e.error) setNotice(sentence(`Transcription failed: ${e.error}`));
           else if (e.cancelled) setNotice('Transcription cancelled. Transcribe again to carry on from where it stopped.');
           else setNotice('Transcription finished.');
           refresh();
@@ -130,13 +131,20 @@ export function App() {
       }),
       on<ImportEvent>('import', (e) => {
         setImporting((n) => Math.max(0, n - 1));
-        if (e.error) setNotice(`Could not import ${e.path}: ${e.error}`);
+        if (e.error) setNotice(sentence(`Could not import ${e.path}: ${e.error}`));
+        else setNotice(`Imported ${e.path.split(/[\\/]/).pop()}.`);
         refresh();
       }),
       on<InstallEvent>('install', (e) => {
         setInstall(e.finished ? null : e);
         if (e.finished) {
-          setNotice(e.error ? `The models were not installed: ${e.error}` : 'The models are installed and checked.');
+          setNotice(
+            e.error && /cancelled/.test(e.error)
+              ? 'The download was cancelled. The files already checked are kept; download again to carry on.'
+              : e.error
+                ? sentence(`The models were not installed: ${e.error}`)
+                : 'The models are installed and checked.',
+          );
           api.modelsStatus().then(setModels);
         }
       }),
@@ -319,6 +327,15 @@ export function App() {
                     onExport={() => setExporting([f])}
                     onEdit={() => openEditor(f)}
                     onDetails={() => setDetails(f)}
+                    onRemove={async () => {
+                      try {
+                        setProject(await api.removeMedia(f.id));
+                        if (selected === f.id) setSelected(null);
+                        setNotice(`${f.label} was taken out of the project. The recording itself was not touched${f.copied ? ', and its copy is still in the project\'s media folder' : ''}.`);
+                      } catch (e) {
+                        setNotice(message(e));
+                      }
+                    }}
                   />
                 ))}
               </ul>
@@ -329,7 +346,7 @@ export function App() {
             {!current ? (
               <p className="hint">Choose a recording to see its transcript.</p>
             ) : !transcript ? (
-              <p className="hint">{current.status === 'failed' ? `This recording could not be transcribed: ${current.error ?? 'unknown reason'}` : 'Not transcribed yet.'}</p>
+              <p className="hint">{current.status === 'failed' ? current.duration > 0 ? sentence(`This recording could not be transcribed: ${current.error ?? 'the reason is not known'}`) : `${sentence(`This recording could not be imported: ${current.error ?? 'the reason is not known'}`)} Remove takes it out of the project.` : 'Not transcribed yet.'}</p>
             ) : (
               <TranscriptView transcript={transcript} />
             )}
@@ -422,6 +439,7 @@ export function App() {
       <SettingsDialog
         isOpen={settingsOpen}
         settings={settings}
+        ffmpegFound={project?.ffmpeg ?? null}
         models={models}
         install={install}
         onNotice={setNotice}
@@ -430,6 +448,7 @@ export function App() {
         onSave={async (s) => {
           setSettings(await api.saveSettings(s));
           setModels(await api.modelsStatus());
+          refresh(); // FFmpeg, found or not, shows in the status bar
           setSettingsOpen(false);
         }}
       />
@@ -451,10 +470,14 @@ function FileRow(props: {
   onExport: () => void;
   onEdit: () => void;
   onDetails: () => void;
+  onRemove: () => void;
 }) {
   const { file: f, job } = props;
   const p = progressText(job?.progress ?? null);
   const done = f.status === 'transcribed';
+  // A failed import has nothing to transcribe; a failed transcription can be tried again.
+  const importFailed = f.status === 'failed' && !(f.duration > 0);
+  const transcribeWords = props.queued ? 'In the queue' : props.queueRunning ? 'Add to the queue' : done ? 'Transcribe again' : 'Transcribe';
   return (
     <li className={props.selected ? 'file selected' : 'file'}>
       <Button className="file-main" onPress={props.onSelect} aria-current={props.selected ? 'true' : undefined}>
@@ -479,25 +502,38 @@ function FileRow(props: {
               </>
             )}
           </ProgressBar>
-          <Button onPress={props.onCancel}>Cancel</Button>
+          <Button onPress={props.onCancel} aria-label={`Cancel transcribing ${f.label}`}>
+            Cancel
+          </Button>
         </div>
       ) : (
         <div className="row actions">
           {done && (
-            <Button className="primary" onPress={props.onEdit}>
+            <Button className="primary" onPress={props.onEdit} aria-label={`Edit ${f.label}`}>
               Edit
             </Button>
           )}
-          <Button className={done ? undefined : 'primary'} isDisabled={props.queued || !props.modelsReady || f.status === 'failed'} onPress={props.onTranscribe}>
-            {props.queued ? 'In the queue' : props.queueRunning ? 'Add to the queue' : done ? 'Transcribe again' : 'Transcribe'}
-          </Button>
-          <Button isDisabled={!done} onPress={props.onExport}>Export…</Button>
+          {!importFailed && (
+            <Button className={done ? undefined : 'primary'} isDisabled={props.queued || !props.modelsReady} onPress={props.onTranscribe} aria-label={`${transcribeWords}: ${f.label}`}>
+              {transcribeWords}
+            </Button>
+          )}
+          {!importFailed && (
+            <Button isDisabled={!done} onPress={props.onExport} aria-label={`Export ${f.label}…`}>
+              Export…
+            </Button>
+          )}
           <Button isDisabled={props.busy} onPress={props.onDetails} aria-label={`Details of ${f.label}`}>
             Details…
           </Button>
+          {!done && !props.queued && (
+            <Button className="quiet" onPress={props.onRemove} aria-label={`Remove ${f.label} from the project`}>
+              Remove
+            </Button>
+          )}
         </div>
       )}
-      {f.status === 'failed' && f.error && <p className="error">{f.error}</p>}
+      {f.error && <p className="error">{sentence(importFailed ? `It could not be imported: ${f.error}` : f.error)}</p>}
     </li>
   );
 }
@@ -508,7 +544,7 @@ function TranscriptView({ transcript: t }: { transcript: Transcript }) {
   return (
     <>
       <p className="hint">
-        {t.turns.length} turns, {t.speakers.length} speaker{t.speakers.length === 1 ? '' : 's'}. Read-only for now; editing comes next.
+        {t.turns.length} turns, {t.speakers.length} speaker{t.speakers.length === 1 ? '' : 's'}. Edit opens it beside the recording, to correct it.
         {low > 0 && ` ${low} word${low === 1 ? '' : 's'} the recognizer was unsure of ${low === 1 ? 'is' : 'are'} tinted.`}
       </p>
       <div className="turns" role="document" aria-label="Transcript">
@@ -555,6 +591,13 @@ function ModelsPanel(props: { models: ModelStatus; settings: Settings; install: 
             </>
           )}
         </ProgressBar>
+      ) : null}
+      {pr ? (
+        <div className="row">
+          <Button onPress={() => api.cancel()} aria-label="Cancel the speech model download">
+            Cancel
+          </Button>
+        </div>
       ) : (
         <div className="row">
           <Button
@@ -674,7 +717,8 @@ function FieldsDialog(props: { paths: string[] | null; file: MediaFile | null; o
   // What the file holds, when known (after import): offer only the splits that make sense.
   const canTracks = !f || (f.audio_tracks ?? 0) > 1 || f.tracks === 'tracks';
   const canChannels = !f || (f.channels ?? 0) > 1 || f.tracks === 'channels';
-  const lang = language.trim().toLowerCase();
+  const lang = languageCode(language);
+  const langBad = lang === null;
   return (
     <ModalOverlay isOpen={isOpen} onOpenChange={(o) => !o && props.onClose()} isDismissable>
       <Modal>
@@ -702,9 +746,10 @@ function FieldsDialog(props: { paths: string[] | null; file: MediaFile | null; o
             <Label>Expected number of speakers</Label>
             <Input placeholder="Found automatically if left empty" />
           </NumberField>
-          <TextField value={language} onChange={setLanguage}>
-            <Label>Language (a two-letter code such as en, fr, ja)</Label>
-            <Input placeholder="Automatic if left empty" maxLength={3} />
+          <TextField value={language} onChange={setLanguage} isInvalid={langBad} validationBehavior="aria">
+            <Label>Language (a code such as en, fr or ja, or its name)</Label>
+            <Input placeholder="Automatic if left empty" />
+            <FieldError>Write a two- or three-letter language code such as en, fr or ja, or the language's name in English, or leave it empty.</FieldError>
           </TextField>
           <TextField value={note} onChange={setNote}>
             <Label>Note</Label>
@@ -744,7 +789,7 @@ function FieldsDialog(props: { paths: string[] | null; file: MediaFile | null; o
             <Button onPress={props.onClose}>Cancel</Button>
             <Button
               className="primary"
-              isDisabled={lang !== '' && !/^[a-z]{2,3}$/.test(lang)}
+              isDisabled={langBad}
               onPress={() =>
                 props.onSave(
                   {
@@ -773,6 +818,8 @@ function FieldsDialog(props: { paths: string[] | null; file: MediaFile | null; o
 function SettingsDialog(props: {
   isOpen: boolean;
   settings: Settings;
+  /** The FFmpeg program found when none is set. */
+  ffmpegFound: string | null;
   models: ModelStatus | null;
   install: InstallEvent | null;
   onNotice: (s: string) => void;
@@ -807,7 +854,50 @@ function SettingsDialog(props: {
             <Radio value="8">8</Radio>
             <Radio value="16">16</Radio>
           </RadioGroup>
-          {props.models && <p className="hint">Speech models: {props.models.dir}</p>}
+          <section className="paths" aria-labelledby="paths-heading">
+            <h3 id="paths-heading">Where things are</h3>
+            <div className="row">
+              <span className="path">
+                <strong>Speech models folder:</strong> {s.model_dir || `${props.models?.dir ?? ''} (the default)`}
+              </span>
+              <Button
+                onPress={async () => {
+                  const d = await open({ directory: true, title: 'Choose the folder for the speech models' });
+                  if (typeof d === 'string') setS({ ...s, model_dir: d });
+                }}
+                aria-label="Choose the speech models folder"
+              >
+                Choose folder…
+              </Button>
+              {s.model_dir && (
+                <Button className="quiet" onPress={() => setS({ ...s, model_dir: null })}>
+                  Use the default
+                </Button>
+              )}
+            </div>
+            {(s.model_dir ?? null) !== (props.settings.model_dir ?? null) && (
+              <p className="hint">Models already in the old folder stay there: move them into the new one, or download or import them again.</p>
+            )}
+            <div className="row">
+              <span className="path">
+                <strong>FFmpeg (for video and other formats):</strong> {s.ffmpeg || props.ffmpegFound || 'not found'}
+              </span>
+              <Button
+                onPress={async () => {
+                  const f = await open({ title: 'Find the FFmpeg program (ffmpeg.exe)', filters: [{ name: 'Program', extensions: ['exe'] }] });
+                  if (typeof f === 'string') setS({ ...s, ffmpeg: f });
+                }}
+                aria-label="Choose the FFmpeg program"
+              >
+                Choose the program…
+              </Button>
+              {s.ffmpeg && (
+                <Button className="quiet" onPress={() => setS({ ...s, ffmpeg: null })}>
+                  Look for it automatically
+                </Button>
+              )}
+            </div>
+          </section>
           {props.models && <HeavyPack models={props.models} settings={s} install={props.install} onWhisper={(w) => setS({ ...s, whisper: w || null })} onNotice={props.onNotice} onModels={props.onModels} />}
           <UpdatesCard />
           <section className="about" aria-labelledby="about-heading">
@@ -865,6 +955,13 @@ function HeavyPack(props: {
             </>
           )}
         </ProgressBar>
+      ) : null}
+      {pr && heavyDownloading ? (
+        <div className="row">
+          <Button onPress={() => api.cancel()} aria-label="Cancel the heavy pack download">
+            Cancel
+          </Button>
+        </div>
       ) : (
         <div className="row">
           {!h.installed && (

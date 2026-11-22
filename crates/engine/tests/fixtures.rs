@@ -57,3 +57,72 @@ fn fixtures_transcribe_with_speakers_and_forward_times() {
         assert!(text.contains("[00:00:0") && text.contains("Speaker 1:") && text.contains("Speaker 2:"), "{text}");
     }
 }
+
+/// A WAV of `seconds` of silence, 16 kHz mono 16-bit.
+fn silent_wav(path: &Path, seconds: u32) {
+    let n = 16_000 * seconds;
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + n * 2).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&16_000u32.to_le_bytes());
+    b.extend_from_slice(&32_000u32.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&(n * 2).to_le_bytes());
+    b.resize(b.len() + (n * 2) as usize, 0);
+    std::fs::write(path, b).unwrap();
+}
+
+#[test]
+fn a_cancelled_or_failed_second_run_keeps_the_first_transcript_and_silence_says_so() {
+    use prism_transcribe_core::project::MediaStatus;
+    let settings = Settings { offline: true, ..Settings::load() };
+    if !models_ready(&settings) {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("proj");
+    Project::create(&dir, "Second run").unwrap();
+    let id = engine::import(&dir, &fixture("two-speaker.wav"), ImportFields::default(), false, None, &mut |_| true).unwrap();
+    let first = engine::transcribe(&dir, &id, &settings, &mut |_| true).unwrap();
+
+    // Cancelled part way: the first transcript is still the file's, and the card still offers Edit and Export.
+    let mut calls = 0;
+    let r = engine::transcribe(&dir, &id, &settings, &mut |_| {
+        calls += 1;
+        calls < 3
+    });
+    assert!(r.is_err());
+    let p = Project::open(&dir).unwrap();
+    assert_eq!(p.media(&id).unwrap().status, MediaStatus::Transcribed);
+    assert_eq!(p.load_transcript(&id).unwrap().unwrap().turns, first.turns);
+
+    // A failure part way (the recording moved away after its 16 kHz copy was deleted) keeps it too, and says why.
+    let moved = d.path().join("moved.wav");
+    std::fs::copy(fixture("two-speaker.wav"), &moved).unwrap();
+    let mid = engine::import(&dir, &moved, ImportFields::default(), false, None, &mut |_| true).unwrap();
+    engine::transcribe(&dir, &mid, &settings, &mut |_| true).unwrap();
+    std::fs::remove_file(&moved).unwrap();
+    assert!(engine::transcribe(&dir, &mid, &settings, &mut |_| true).is_err());
+    let p = Project::open(&dir).unwrap();
+    let m = p.media(&mid).unwrap();
+    assert_eq!(m.status, MediaStatus::Transcribed);
+    assert!(m.error.as_deref().unwrap_or("").contains("earlier transcript is kept"), "{:?}", m.error);
+    assert!(p.load_transcript(&mid).unwrap().is_some());
+
+    // Silence: no transcript, and the reason in words.
+    let quiet = d.path().join("silence.wav");
+    silent_wav(&quiet, 6);
+    let sid = engine::import(&dir, &quiet, ImportFields::default(), false, None, &mut |_| true).unwrap();
+    let e = engine::transcribe(&dir, &sid, &settings, &mut |_| true).err().unwrap();
+    assert!(matches!(e, engine::EngineError::NoSpeech(_)), "{e}");
+    let p = Project::open(&dir).unwrap();
+    assert_eq!(p.media(&sid).unwrap().status, MediaStatus::Failed);
+    assert!(p.load_transcript(&sid).unwrap().is_none());
+    assert!(e.to_string().starts_with("no speech was heard in silence"), "{e}");
+}

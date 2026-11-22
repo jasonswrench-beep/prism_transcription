@@ -3,10 +3,10 @@
 import { useEffect, useState } from 'react';
 import { Button, ProgressBar } from 'react-aria-components';
 import { api, on, type UpdateFound, type UpdateState } from './api';
+import { errorText } from './format';
 
 function message(e: unknown): string {
-  const s = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  return errorText(e);
 }
 
 /** Ask an open editor to save now, and wait for it (the installer closes the program). */

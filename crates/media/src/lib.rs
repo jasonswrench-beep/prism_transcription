@@ -26,13 +26,14 @@ pub const IMPORT_EXTENSIONS: &[&str] = &["wav", "mp3", "m4a", "aac", "flac", "og
 pub enum MediaError {
     #[error("{0}")]
     Io(#[from] std::io::Error),
-    #[error("this file could not be read as audio ({0}), and FFmpeg is not available to try it")]
+    /// The detail (the decoder's own words) is kept for the log, not shown: it is jargon to a reader.
+    #[error("this file could not be read as audio: it may be damaged, or in a format that needs FFmpeg, which was not found")]
     NeedsFfmpeg(String),
-    #[error("FFmpeg could not read this file: {0}")]
+    #[error("this file could not be read as audio, even with FFmpeg: it may be damaged, or not a recording")]
     Ffmpeg(String),
     #[error("this file has no audio track")]
     NoAudio,
-    #[error("the audio could not be decoded: {0}")]
+    #[error("the audio in this file could not be read: the file may be damaged")]
     Decode(String),
     #[error("the job was cancelled")]
     Cancelled,

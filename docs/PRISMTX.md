@@ -77,7 +77,11 @@ What a QDA program needs beside the words, in its terms.
 }
 ```
 
-- `media.path` is the recording's absolute path when it was packaged; the recording is linked, not copied.
+- `media.path` is the recording's absolute path when it was packaged; the recording is linked, not copied. A
+  package marked `deidentified` has no `path`, and its `file_name` is the recording's id and file ending
+  (`F001.wav`), because a file or folder name often holds a participant's or a site's name; the reader finds the
+  recording by `fingerprint` or asks where it is. (The `.qdpx` export does the same: a de-identified one links
+  `relative://F001.wav`.)
   `sha256` is the whole file's, taken at import. `fingerprint` is PrismQDA's media fingerprint: SHA-256 of the file
   size as 8 bytes little-endian, then the first MiB, then the last MiB (the whole file when it is smaller), so the
   recording can be found again after it moves. `kind` is `audio` or `video`.
@@ -98,8 +102,8 @@ readers that know only captions: PrismQDA already imports it beside a recording 
 2. For each document: a source of type `transcript`, its text the turns joined by blank lines (NFC), one
    `speaker_turn` unit per turn with its speaker and `time_start_ms`/`time_end_ms`, and the speaker's turns
    `excluded` when the case says `interviewer`.
-3. Link the recording by `media.path`; if it is not there, look for a file with the same `fingerprint`, and else
-   ask the user where it is.
+3. Link the recording by `media.path`; if it is not there (or not given), look for a file with the same
+   `fingerprint`, and else ask the user where it is.
 4. One case per entry of `cases`, holding that speaker's turns, with its attributes.
 5. Say on import whether the package was marked `deidentified`.
 

@@ -6,9 +6,10 @@ import { useEffect, useState } from 'react';
 import { Button, Checkbox, Dialog, Heading, Input, Label, Modal, ModalOverlay, TextField } from 'react-aria-components';
 import { save } from '@tauri-apps/plugin-dialog';
 import { api, type ProjectView, type Settings } from './api';
+import { errorText } from './format';
 
 function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 /** Shown instead of the recordings while a protected project is locked. */

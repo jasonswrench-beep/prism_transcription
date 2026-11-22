@@ -59,7 +59,7 @@ code { font-size: 0.9em; overflow-wrap: anywhere; }
 .app { display: flex; flex-direction: column; height: 100vh; }
 .app > main { flex: 1; min-height: 0; }
 
-.titlebar { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem; background: var(--surface); border-bottom: 1px solid var(--line); }
+.titlebar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem; background: var(--surface); border-bottom: 1px solid var(--line); }
 .logo { width: 26px; height: 26px; }
 .project-name { color: var(--muted); }
 .spacer { flex: 1; }
@@ -87,7 +87,7 @@ button.quiet { border-color: transparent; background: transparent; color: var(--
 .workspace { display: grid; grid-template-columns: minmax(320px, 2fr) 3fr; min-height: 0; }
 .files, .transcript { padding: 1rem; overflow: auto; min-height: 0; }
 .files { border-right: 1px solid var(--line); }
-.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
+.section-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: space-between; margin-bottom: 0.6rem; }
 .hint { color: var(--muted); margin: 0.4rem 0; }
 .error { color: var(--danger); margin: 0.3rem 0 0; }
 
@@ -112,7 +112,7 @@ mark.unsure { background: var(--mark); color: var(--mark-text); border-radius: 2
 .speaker-4 { border-left-color: var(--s4); } .speaker-5 { border-left-color: var(--s5); } .speaker-6 { border-left-color: var(--s6); }
 .speaker-7 { border-left-color: var(--s7); } .speaker-8 { border-left-color: var(--s8); }
 
-.statusbar { display: flex; gap: 1.2rem; align-items: center; padding: 0.35rem 1rem; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 0.88em; }
+.statusbar { display: flex; flex-wrap: wrap; gap: 0.3rem 1.2rem; align-items: center; padding: 0.35rem 1rem; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 0.88em; }
 .offline { color: var(--text); font-weight: 600; }
 
 .react-aria-ModalOverlay { position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); display: grid; place-items: center; z-index: 10; }
@@ -270,6 +270,21 @@ kbd { font-family: inherit; font-size: 0.9em; border: 1px solid var(--line); bor
 .keys-table th[scope="row"] { white-space: nowrap; }
 .updates { border-top: 1px solid var(--line); padding-top: 0.3rem; display: grid; gap: 0.4rem; }
 .update-found { display: grid; gap: 0.4rem; }
+/* Narrow windows and high zoom (400 percent of a 1280-pixel screen is 320 pixels): one column, nothing wider than
+   the window, so the page never scrolls sideways. */
+@media (max-width: 760px) {
+  .app { height: auto; min-height: 100vh; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .files { border-right: none; border-bottom: 1px solid var(--line); }
+  .editor-panes { grid-template-columns: minmax(0, 1fr); }
+  .media-pane { border-left: none; border-top: 1px solid var(--line); }
+  .turn-list .turn { grid-template-columns: minmax(0, 1fr); }
+  .titlebar, .editor-bar, .find-bar, .notice, .statusbar { padding-left: 0.6rem; padding-right: 0.6rem; }
+  .notice { flex-wrap: wrap; }
+  .react-aria-Modal { width: calc(100vw - 1rem); }
+  .review-item .row input { width: 100%; }
+}
+
 @media print {
   .no-print, .react-aria-ModalOverlay ~ *, .app > *:not(.react-aria-ModalOverlay) { display: none !important; }
   .react-aria-ModalOverlay { position: static; background: none; }

@@ -5,7 +5,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { api, type EditorInfo, type MediaFile, type ReviewStatus, type Speaker, type SpeakerOp, type SpeakerStats, type Transcript, type Turn } from '../api';
-import { hms, LOW_CONFIDENCE } from '../format';
+import { errorText, errorWords, hms, LOW_CONFIDENCE, sentence } from '../format';
 import { History } from './history';
 import { actionFor, showKey, speakerSlot, type Action } from './keys';
 import { MediaPane, type PlayerState } from './MediaPane';
@@ -223,7 +223,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
     api.editorInfo(props.file.id).then((i) => {
       setInfo(i);
       setHotkeys(i.hotkeys);
-    }, (e) => props.onNotice(String(e)));
+    }, (e) => props.onNotice(errorText(e)));
     api.peaks(props.file.id).then(setPeaks, () => setPeaks(null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.file.id]);
@@ -271,7 +271,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
       setSavedAt(new Date());
       props.onSaved();
     } catch (e) {
-      if (!quiet) props.onNotice(`Could not save: ${String(e)}`);
+      if (!quiet) props.onNotice(sentence(`Could not save: ${errorWords(e)}`));
     }
   }, [commitAll, props]);
 
@@ -332,7 +332,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
     else if (lastPause.current !== null && info) m.currentTime = Math.max(0, m.currentTime - info.rewind_on_resume); // rewind on resume
     lastPause.current = null;
     audio.current?.ctx.resume();
-    m.play().catch((e) => props.onNotice(`The recording could not be played: ${String(e)}`));
+    m.play().catch((e) => props.onNotice(sentence(`The recording could not be played: ${errorWords(e)}`)));
   }, [info, props]);
 
   const pause = useCallback(() => {
@@ -811,8 +811,9 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
             ))}
           </select>
         </label>
+        {/* One name, pressed or not: changing the words as well made a screen reader say the change twice. */}
         <Button onPress={() => setCleanView((c) => !c)} aria-pressed={cleanView}>
-          {cleanView ? 'Clean view (read-only)' : 'Verbatim'}
+          Clean view
         </Button>
         <Button onPress={() => { rememberCursor(); setNotationOpen(true); }} aria-label={`Notation (${keyLabel('notation')})`}>
           Notation
@@ -945,7 +946,7 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
             setDoc(r.turns, r.speakers);
             props.onNotice(`Found ${r.speakers.length} speaker${r.speakers.length === 1 ? '' : 's'}. Undo (Ctrl+Z) brings back the speakers you had.`);
           } catch (e) {
-            props.onNotice(`Could not find the speakers again: ${String(e)}`);
+            props.onNotice(sentence(`Could not find the speakers again: ${errorWords(e)}`));
           }
         }}
       />
@@ -955,9 +956,14 @@ export function Editor(props: { file: MediaFile; transcript: Transcript; onClose
         rewind={info?.rewind_on_resume ?? 1.5}
         onClose={() => setKeysOpen(false)}
         onSave={async (keys, rewind) => {
-          setHotkeys(await api.setHotkeys(keys, rewind));
-          setInfo((i) => (i ? { ...i, rewind_on_resume: rewind } : i));
-          setKeysOpen(false);
+          try {
+            setHotkeys(await api.setHotkeys(keys, rewind));
+            setInfo((i) => (i ? { ...i, rewind_on_resume: rewind } : i));
+            setKeysOpen(false);
+            props.onNotice('Keys saved.');
+          } catch (e) {
+            props.onNotice(sentence(`Could not save the keys: ${errorWords(e)}`));
+          }
         }}
       />
     </div>

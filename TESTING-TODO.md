@@ -3,6 +3,25 @@
 Things the build sessions could not check themselves. Newest phase first. When one is done, delete it and note the
 result in the matching results file.
 
+## Fixes from the alpha 2 manual (2026-11-22)
+
+The manual written on alpha 2 found 21 faults; they are fixed in the source and checked by tests and by driving the
+built window. These need a person:
+
+- [ ] **Keys, by hand.** In the editor, Keys, change Play or pause to F9, Save: "Keys saved." shows, F9 plays, the
+      play button's label says F9, and Help lists F9. Set the rewind to 3 seconds and hear it on resume.
+- [ ] **A screen reader (NVDA) on the recording cards:** each Transcribe, Export, Edit and Remove button says which
+      recording it is for. In Speakers, after Find speakers again, the focus is back on its button and Escape closes
+      the window.
+- [ ] **400 percent zoom** (Windows' display scaling, not the window's own zoom): nothing needs scrolling sideways,
+      in the recordings list and in the editor.
+- [ ] **A de-identified package in PrismQDA.** Export a .qdpx marked de-identified and import it: the recording is
+      linked as `relative://F001.wav` (its id), so PrismQDA does not find it on its own. Say whether PrismQDA's
+      importer asks where it is, or whether the recording should be copied beside the package with that name.
+- [ ] **The two web view connections** to Microsoft addresses (port 443) seen once during the model download in the
+      manual's test: check them on a real installation with a network monitor (Resource Monitor, Network tab). The page
+      made no request of its own; they are probably the web view's own housekeeping.
+
 ## Phase 5
 
 - [ ] **Help.** Press F1 (or Help) on each screen: the steps read right, the keys listed are the ones set in the editor

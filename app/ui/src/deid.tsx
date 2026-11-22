@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Dialog, Heading, Label, Modal, ModalOverlay, Tab, TabList, TabPanel, Tabs, TextArea, TextField } from 'react-aria-components';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { api, type FileCheck, type FileCount, type Flag, type KeyState, type LogEntry, type NameEntry, type NameKind, type PatternKind, type ProjectView, type Suggestion } from './api';
-import { hms } from './format';
+import { hms, errorText } from './format';
 
 const KIND_WORDS: Record<NameKind, string> = { person: 'Person', place: 'Place', organisation: 'Organisation', other: 'Other' };
 
@@ -31,7 +31,7 @@ const PATTERN_REPLACEMENT: Record<PatternKind, string> = {
 const REVIEW_WORDS: Record<string, string> = { not_started: 'Not started', first_pass: 'First pass', checked: 'Checked', de_identified: 'De-identified', final: 'Final' };
 
 function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e);
+  return errorText(e);
 }
 
 function defaultReplacement(kind: NameKind, names: NameEntry[]): string {

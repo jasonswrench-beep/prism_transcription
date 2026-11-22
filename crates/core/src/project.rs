@@ -28,6 +28,8 @@ pub enum ProjectError {
     Io(#[from] std::io::Error),
     #[error("{path} is not a Prism Transcribe project file")]
     NotAProject { path: String },
+    #[error("there is no Prism Transcribe project in {dir}: choose the folder that holds its project.prismtranscribe file, or start a new project")]
+    NoProjectHere { dir: String },
     #[error("this project was written by a newer Prism Transcribe (schema {0}); update the app to open it")]
     NewerSchema(u32),
     #[error("the project file is damaged: {0}")]
@@ -38,6 +40,8 @@ pub enum ProjectError {
     NoSuchMedia(String),
     #[error("a project already exists in {0}")]
     Exists(String),
+    #[error("{0} has a transcript, so it stays in the project")]
+    HasTranscript(String),
     #[error("this project is password protected; unlock it with its password first")]
     Locked,
     #[error("{0}")]
@@ -269,7 +273,10 @@ impl Project {
 
     fn open_file(path: &Path) -> Result<Self> {
         let (dir, file) = if path.is_dir() { (path.to_path_buf(), path.join(PROJECT_FILE)) } else { (path.parent().unwrap_or(Path::new(".")).to_path_buf(), path.to_path_buf()) };
-        let text = std::fs::read_to_string(&file)?;
+        let text = match std::fs::read_to_string(&file) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(ProjectError::NoProjectHere { dir: dir.display().to_string().trim_start_matches(r"\\?\").to_string() }),
+            r => r?,
+        };
         let v: serde_json::Value = serde_json::from_str(&text)?;
         if v.get("format").and_then(|f| f.as_str()) != Some(PROJECT_FORMAT) {
             return Err(ProjectError::NotAProject { path: file.display().to_string() });
@@ -473,6 +480,32 @@ impl Project {
         Ok(r)
     }
 
+    /// Take a recording that has no transcript out of the project (a failed import, or one imported by mistake):
+    /// its entry, its place in the queue, and its temporary and cached files. The recording itself is never touched,
+    /// and a copy in `media/` stays where it is. Refused when it has a transcript, so no work is lost this way.
+    pub fn remove_media(dir: &Path, id: &str) -> Result<()> {
+        Project::update(dir, |p| {
+            p.media(id)?;
+            if p.transcript_path(id).exists() || p.locked_path(id).exists() {
+                return Err(ProjectError::HasTranscript(p.media(id)?.fields.label.clone()));
+            }
+            p.file.files.retain(|m| m.id != id);
+            p.file.queue.remove(id);
+            p.file.queue.rev += 1;
+            for d in [p.temp_dir(), p.cache_dir()] {
+                if let Ok(rd) = std::fs::read_dir(&d) {
+                    for e in rd.flatten() {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        if name.split('.').next() == Some(id) {
+                            let _ = std::fs::remove_file(e.path());
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
     /// Remove temporary audio and job files left behind (the "Clean up" button). Returns how many were removed.
     pub fn clean_up(&self) -> Result<usize> {
         let mut n = 0;
@@ -589,5 +622,45 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join(PROJECT_FILE), r#"{"format":"something else"}"#).unwrap();
         assert!(matches!(Project::open(tmp.path()), Err(ProjectError::NotAProject { .. })));
+    }
+
+    #[test]
+    fn a_folder_without_a_project_says_so_in_words() {
+        let tmp = tempfile::tempdir().unwrap();
+        let e = Project::open(tmp.path()).err().unwrap();
+        assert!(matches!(e, ProjectError::NoProjectHere { .. }));
+        let words = e.to_string();
+        assert!(words.contains("no Prism Transcribe project") && !words.contains("os error"), "{words}");
+    }
+
+    #[test]
+    fn a_recording_without_a_transcript_can_be_removed_and_one_with_a_transcript_cannot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut p = Project::create(tmp.path(), "x").unwrap();
+        let rec = tmp.path().join("a.wav");
+        std::fs::write(&rec, b"RIFF").unwrap();
+        let a = p.add_media(&rec, ImportFields::default(), false).unwrap();
+        let b = p.add_media(&rec, ImportFields::default(), false).unwrap();
+        std::fs::write(p.temp_dir().join(format!("{a}.16k.wav")), b"x").unwrap();
+        std::fs::create_dir_all(p.cache_dir()).unwrap();
+        std::fs::write(p.cache_dir().join(format!("{a}.peaks")), b"x").unwrap();
+        std::fs::write(p.cache_dir().join(format!("{b}.peaks")), b"x").unwrap();
+        Project::update(tmp.path(), |q| {
+            q.file.queue.add(std::slice::from_ref(&a));
+            Ok(())
+        })
+        .unwrap();
+        let mut t = crate::model::tests::sample();
+        t.media = b.clone();
+        p.save_transcript(&t).unwrap();
+
+        Project::remove_media(tmp.path(), &a).unwrap();
+        let p = Project::open(tmp.path()).unwrap();
+        assert!(p.media(&a).is_err() && p.file.queue.items.is_empty());
+        assert!(!p.temp_dir().join(format!("{a}.16k.wav")).exists() && !p.cache_dir().join(format!("{a}.peaks")).exists());
+        assert!(p.cache_dir().join(format!("{b}.peaks")).exists(), "another file's cache is left alone");
+        assert!(rec.exists(), "the recording itself is never touched");
+        assert!(matches!(Project::remove_media(tmp.path(), &b), Err(ProjectError::HasTranscript(_))));
+        assert!(Project::open(tmp.path()).unwrap().media(&b).is_ok());
     }
 }

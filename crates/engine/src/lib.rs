@@ -39,6 +39,8 @@ pub enum EngineError {
     Key(String),
     #[error("{0}")]
     NotDeidentified(String),
+    #[error("no speech was heard in {0}, so it has no transcript. If someone does speak in it, check that the sound is not very quiet, or try the heavy pack in Details, Advanced settings")]
+    NoSpeech(String),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
@@ -380,6 +382,14 @@ pub fn transcribe(dir: &Path, id: &str, settings: &Settings, progress: &mut dyn 
         t.provenance = Provenance { engine: engine_name, pack: pack.id.into(), created, seconds: started.elapsed().as_secs_f64(), expected_speakers: m.fields.expected_speakers };
         Ok(t)
     })();
+    // A recording with no speech gives no transcript: say so, rather than mark it transcribed with nothing in it.
+    let result = match result {
+        Ok(t) if t.turns.is_empty() => Err(EngineError::NoSpeech(m.fields.label.clone())),
+        r => r,
+    };
+    // Transcribing again: an earlier transcript stays the file's transcript until a new one replaces it, so a
+    // cancel or a failure leaves it there to edit and export.
+    let had_transcript = { let p = Project::open(dir)?; p.transcript_path(id).exists() || p.locked_path(id).exists() };
     match result {
         Ok(t) => {
             Project::open(dir)?.save_transcript(&t)?;
@@ -391,14 +401,38 @@ pub fn transcribe(dir: &Path, id: &str, settings: &Settings, progress: &mut dyn 
         }
         Err(EngineError::Speech(SpeechError::Cancelled)) => {
             // Keep the 16 kHz copies and the checkpoints: the next run carries on.
-            set_status(dir, id, MediaStatus::Imported, None)?;
+            set_status(dir, id, if had_transcript { MediaStatus::Transcribed } else { MediaStatus::Imported }, None)?;
             Err(EngineError::Speech(SpeechError::Cancelled))
         }
         Err(e) => {
-            set_status(dir, id, MediaStatus::Failed, Some(e.to_string()))?;
+            if had_transcript {
+                set_status(dir, id, MediaStatus::Transcribed, Some(format!("Transcribing it again did not work, so the earlier transcript is kept: {e}")))?;
+            } else {
+                set_status(dir, id, MediaStatus::Failed, Some(e.to_string()))?;
+            }
+            for p in leftovers.iter().filter(|_| matches!(e, EngineError::NoSpeech(_))) {
+                let _ = std::fs::remove_file(p);
+            }
             Err(e)
         }
     }
+}
+
+/// The notation menu's list as saved (T4): one entry per line, blank lines dropped, and a line without square
+/// brackets given them, so nothing typed is lost.
+pub fn notation_list(lines: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for l in lines {
+        let l = l.trim();
+        if l.is_empty() {
+            continue;
+        }
+        let e = if l.starts_with('[') && l.ends_with(']') { l.to_string() } else { format!("[{}]", l.trim_start_matches('[').trim_end_matches(']').trim()) };
+        if e != "[]" && !out.contains(&e) {
+            out.push(e);
+        }
+    }
+    out
 }
 
 /// Find the speakers again with another expected count (T3), keeping every word as it is now (edits included):
@@ -515,7 +549,7 @@ pub fn export_files(p: &Project, ids: &[String], format: ExportFormat, out: &Pat
         let docs: Vec<Doc> = loaded.iter().map(|(m, t, path)| Doc { media: m, transcript: t, path: path.clone() }).collect();
         let bytes = match format {
             ExportFormat::Prismtx => package::to_prismtx(&docs, deidentified, env!("CARGO_PKG_VERSION"))?,
-            _ => package::to_qdpx(&p.file.name, &docs, env!("CARGO_PKG_VERSION"))?,
+            _ => package::to_qdpx(&p.file.name, &docs, deidentified, env!("CARGO_PKG_VERSION"))?,
         };
         std::fs::write(out, bytes)?;
         return Ok(());
@@ -629,4 +663,15 @@ pub fn replace_in_project(dir: &Path, find: &str, replace: &str, opts: &prism_tr
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_notation_line_without_brackets_gets_them() {
+        let l = |v: &[&str]| notation_list(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(l(&["[laughter]", "  cough ", "", "[pause", "cough", "[]"]), vec!["[laughter]", "[cough]", "[pause]"]);
+    }
 }
