@@ -1,0 +1,11 @@
+Prism Transcribe 0.1.0 alpha 3, a preview for testing. It fixes the 21 faults found while the manual was written on alpha 2.
+
+Fixed, work and data: the Keys window saves. Cancelling or failing while transcribing again keeps the earlier transcript. A failed import can be removed. A recording with no speech says so instead of giving an empty transcript. A notation line without square brackets gets them instead of being dropped.
+
+Fixed, de-identification: a package or REFI-QDA project marked de-identified no longer names the recording's file or folder, so a program that imports it, PrismQDA included, does not find the recording on its own. Replacements such as [College] are no longer reported as names left behind, a name inside an email address takes the whole address, and an initial goes with its name. If you exported a de-identified package with alpha 2, export it again: the earlier file holds the recording's file name and folder. A recording's label is still exported, so check that it names nobody.
+
+Fixed, access: buttons name their recording for screen readers, focus returns after Find speakers again, and the window fits at 400 percent zoom.
+
+Also: plainer messages, Help corrected, the models folder and FFmpeg in Settings, and Cancel on both model downloads.
+
+Keep your original recordings, and check transcripts against them before relying on them.

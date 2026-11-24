@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "prism-transcribe-app"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "prism-transcribe-core",
  "prism-transcribe-engine",
@@ -3287,7 +3287,7 @@ dependencies = [
 
 [[package]]
 name = "prism-transcribe-bench"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "prism-transcribe-speech",
  "serde",
@@ -3297,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "prism-transcribe-core"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "argon2",
  "chacha20poly1305",
@@ -3315,7 +3315,7 @@ dependencies = [
 
 [[package]]
 name = "prism-transcribe-engine"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "prism-transcribe-core",
  "prism-transcribe-media",
@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "prism-transcribe-media"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "hound",
  "rubato",
@@ -3342,7 +3342,7 @@ dependencies = [
 
 [[package]]
 name = "prism-transcribe-speech"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "bzip2 0.6.1",
  "hound",

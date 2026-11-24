@@ -4,7 +4,7 @@ Prism Transcribe turns interview and focus-group recordings into speaker-labelle
 researcher's own Windows computer, and sends them to PrismQDA. Nothing leaves the machine: the audio, the transcript
 and every file in between stay local, and the speech models run on the computer itself.
 
-**Status: 0.1.0-alpha.2, a preview ([releases](https://github.com/jasonswrench-beep/prism_transcription/releases)): signed, for testing, not yet in Prism Hub. From this version on, Check for updates installs newer ones.** The app creates or opens a
+**Status: 0.1.0-alpha.3, a preview ([releases](https://github.com/jasonswrench-beep/prism_transcription/releases)): signed, for testing, not yet in Prism Hub. From 0.1.0-alpha.2 on, Check for updates installs newer ones.** The app creates or opens a
 project, imports recordings, installs and checks its speech models (or imports them from an offline zip), transcribes
 them through a batch queue, and opens each transcript in an editor:
 - **Panes:** the transcript beside the recording, with its picture when it has one, a waveform and a whole-file overview with a colour band per speaker.
