@@ -14,6 +14,11 @@ https://github.com/jasonswrench-beep/prism_transcription/releases/tag/v0.1.0-alp
 `47732b62c6ea8aca679c312e01e388b835f3dd8d15a2ad5b226cd2d5051f2e71`), and the `update-feed` release made, holding its
 `latest.json`. The first version Check for updates can update from.
 
+**Done for 0.1.0-alpha.3 (2026-11-24):** commit `2c1a06d` tagged and built signed with `-Updates`, published as a
+pre-release: https://github.com/jasonswrench-beep/prism_transcription/releases/tag/v0.1.0-alpha.3 (setup 13,616,344
+bytes, SHA-256 `72b7d82966677353ff8057c03ab129d953250d972ddcdb8fe9a7e484c5ef910e`), and its `latest.json` put in
+`update-feed`: the first update Check for updates can offer.
+
 **Still to do:** the Prism Hub entry (step 6) and the PrismQDA item (step 7).
 
 ## In this repository

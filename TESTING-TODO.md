@@ -26,8 +26,8 @@ built window. These need a person:
 
 - [ ] **Help.** Press F1 (or Help) on each screen: the steps read right, the keys listed are the ones set in the editor
   (change one with the Keys button and look again), and Print gives a clean page. NVDA should read the steps and the table.
-- [ ] **Check for updates, end to end, once the update key exists** (docs/UPDATES.md): install a version built with the
-  key, publish a higher one with its `latest.json` in the update-feed release, then Check for updates: the notes show,
+- [ ] **Check for updates, end to end** (docs/UPDATES.md), possible since 0.1.0-alpha.3 was published on 2026-11-24:
+  with 0.1.0-alpha.2 installed, Check for updates: 0.1.0-alpha.3 and its notes show,
   Install saves an open transcript, the installer runs without administrator rights, and the program opens at the new
   version. Also: with Offline on, the button is not offered; during a transcription, Install is refused. Tested by the
   build session only against a feed on this computer.
